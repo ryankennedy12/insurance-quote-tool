@@ -11,4 +11,5 @@ jinja2>=3.1.5
 fpdf2>=2.8.0
 # weasyprint>=62.0  # Commented out: Windows compatibility issues; fpdf2 is primary
 json-repair>=0.30.0
+tenacity>=9.0.0
 # sentry-sdk>=2.19.0  # Optional: error tracking

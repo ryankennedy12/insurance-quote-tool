@@ -80,7 +80,7 @@ print('Check data/logs/app.log')
 
 ## Phase 2: AI Extraction Engine (Evening 2)
 
-### Step 4: Pydantic Data Models
+### Step 4: Pydantic Data Models -- COMPLETE (2026-02-10)
 
 **Build:** `app/extraction/models.py`
 
@@ -117,7 +117,7 @@ print(q.model_dump_json(indent=2))
 
 ---
 
-### Step 5: PDF Text Extraction
+### Step 5: PDF Text Extraction -- COMPLETE (2026-02-10)
 
 **Build:** `app/extraction/pdf_parser.py`
 
@@ -143,7 +143,7 @@ print(text[:500])
 
 ---
 
-### Step 6: AI Extraction Module
+### Step 6: AI Extraction Module -- COMPLETE (2026-02-10)
 
 **Build:** `app/extraction/ai_extractor.py`
 
@@ -484,3 +484,52 @@ Create a desktop shortcut pointing to `run.bat`.
 - Uses `LOG_LEVEL` from config module
 
 **Verification:** `logger.info('Test message')` — written to both console and `data/logs/app.log`.
+
+### 2026-02-10 — Phase 2, Step 4: Pydantic Data Models
+
+**Status:** COMPLETE
+
+**Built:** `app/extraction/models.py` — two Pydantic v2 models.
+
+**Details:**
+- `InsuranceQuote`: 15 fields matching PROJECT_SPEC.md exactly, all with `Field(description=...)` for Gemini schema enforcement
+- `QuoteExtractionResult`: wrapper with filename, success, optional quote/error, warnings list
+- No `Literal` on confidence — validator handles bad values instead of rejecting at parse time
+
+**Verification:** `InsuranceQuote` instantiates and serializes to JSON correctly with `model_dump_json()`.
+
+### 2026-02-10 — Phase 2, Step 5: PDF Text Extraction
+
+**Status:** COMPLETE
+
+**Built:** `app/extraction/pdf_parser.py` — single function `extract_text_from_pdf()`.
+
+**Details:**
+- Writes bytes to `tempfile.NamedTemporaryFile`, runs `pymupdf4llm.to_markdown()`, deletes temp file in `finally`
+- Uses `fitz.open()` for page count; `is_digital = (chars / pages) > 100`
+- On any exception: logs error with traceback, returns `("", False)`
+
+**Verification:** Invalid bytes test returns `("", False)` cleanly with logged traceback.
+
+### 2026-02-10 — Phase 2, Step 6: AI Extraction Module
+
+**Status:** COMPLETE
+
+**Built:** `app/extraction/ai_extractor.py` — Gemini 2.5 Flash extraction via `google-genai` SDK.
+
+**Details:**
+- Uses correct SDK: `from google import genai`, `client = genai.Client(api_key=...)`, `client.models.generate_content()`
+- Model string: `gemini-2.5-flash` (per CLAUDE.md, not the preview string in EXTRACTION_PROMPT.md)
+- `SYSTEM_PROMPT` verbatim from EXTRACTION_PROMPT.md with `{carrier_hints}` placeholder
+- `CARRIER_HINTS` dict: 8 carriers (erie, state farm, progressive, safeco, nationwide, allstate, westfield, grange) + default
+- `response_schema=InsuranceQuote` passed directly; `response.parsed` returns Pydantic object
+- Fallback: `_parse_response()` with `json-repair` if `.parsed` is None
+- `tenacity` added to requirements.txt: `@retry(stop=3, wait=exponential(min=2, max=10))`
+- Text path (`_call_gemini_text`) and multimodal path (`_call_gemini_multimodal` via `client.files.upload()`)
+- `extract_and_validate()` wired up with lazy import of `validate_quote` (Step 7)
+
+**Deferred to Phase 6:**
+- OpenAI GPT-4o-mini backup
+- Two-phase carrier identification
+
+**Verification:** Module imports successfully; `CARRIER_HINTS` has 9 keys; `get_carrier_hints("Erie Insurance")` matches erie entry.
