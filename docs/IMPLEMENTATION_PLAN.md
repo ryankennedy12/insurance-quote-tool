@@ -568,3 +568,25 @@ Create a desktop shortcut pointing to `run.bat`.
 - Coverage limits validation now uses `isinstance(value, (int, float))` guard — string values like "ALS" skip the positivity check
 
 **Verification:** `InsuranceQuote` with `coverage_limits={'dwelling': 300000, 'loss_of_use': 'ALS'}` serializes correctly and produces zero validation warnings. `CarrierBundle.total_premium` and `CurrentPolicy.total_premium` sum correctly. `ComparisonSession` wires all models together.
+
+### 2026-02-11 — Phase 3, Step 8: Google Sheets Client
+
+**Status:** COMPLETE
+
+**Built:** `app/sheets/sheets_client.py` — Google Sheets output module with multi-policy bundled layout
+
+**Details:**
+- `SheetsClient` class authenticates via `gspread.service_account(filename=GOOGLE_CREDS_PATH)`
+- `create_comparison(session: ComparisonSession) -> str` transforms session into 25-row fixed template layout
+- Fixed row structure (rows 1-25): Header (1-3), Premium Summary (4-7), Home Details (9-15), Auto Details (17-21), Umbrella Details (23-25)
+- Column mapping: A = row labels, B = Current Policy, C-H = up to 6 CarrierBundles
+- Data grid: 22 rows x 7 columns (rows 4-25, columns B-H), written via single batch update at B4
+- **Value formatting:** Raw numeric values (floats/ints) for currency and coverage limits — Google Sheets template formatting handles display. Strings only for text values ("ALS"), compound values ("500/500/250", "1M CSL"), and missing data ("-")
+- gspread v6.1+ API verified: `worksheet.update(grid, 'B4')` (values first, then range)
+- Worksheet naming: `Quote_{client_name}_{date}` with `_2`, `_3` suffixes for duplicates
+- 5 custom exceptions: `SheetsClientError`, `SpreadsheetNotFoundError`, `TemplateNotFoundError`, `PermissionDeniedError`, `QuotaExceededError`
+- Helper methods: `_build_premium_row`, `_build_total_row`, `_build_home_section`, `_build_auto_section`, `_build_umbrella_section`
+- Special formatting methods: `_get_auto_limits` (constructs "500/500/250" or "1M CSL"), `_get_umbrella_limits`
+- Conditional section population: Only writes data if section in `sections_included`, otherwise leaves blank
+
+**Verification:** `from app.sheets.sheets_client import SheetsClient, TemplateNotFoundError, SpreadsheetNotFoundError; print('Sheets client imports OK')` — All imports successful.
