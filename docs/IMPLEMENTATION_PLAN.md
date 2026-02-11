@@ -551,3 +551,20 @@ Create a desktop shortcut pointing to `run.bat`.
 - Logging: WARNING for quotes with issues, INFO for clean quotes
 
 **Verification:** Bad-data test produced 4 expected warnings (premium, deductible, coverage limit, confidence). Confidence corrected from "maybe" to "low".
+
+### 2026-02-11 — Pre-Phase 3: SPEC_UPDATE.md Model Updates
+
+**Status:** COMPLETE
+
+**Context:** `docs/SPEC_UPDATE.md` introduced multi-policy bundled quotes and current-policy baseline columns. Models and validator updated before starting Phase 3 (Sheets).
+
+**Updated:** `app/extraction/models.py`
+- `InsuranceQuote.coverage_limits`: `dict[str, float]` → `dict[str, float | str]` (supports text values like "ALS" / Actual Loss Sustained)
+- Added `CarrierBundle` — groups home/auto/umbrella `InsuranceQuote`s per carrier, with `total_premium` and `policy_types_present` properties
+- Added `CurrentPolicy` — customer's existing coverage baseline (15 optional home/auto/umbrella fields, `total_premium` property)
+- Added `ComparisonSession` — top-level container: `client_name`, `date`, optional `CurrentPolicy`, list of `CarrierBundle`, `sections_included`
+
+**Updated:** `app/extraction/validator.py`
+- Coverage limits validation now uses `isinstance(value, (int, float))` guard — string values like "ALS" skip the positivity check
+
+**Verification:** `InsuranceQuote` with `coverage_limits={'dwelling': 300000, 'loss_of_use': 'ALS'}` serializes correctly and produces zero validation warnings. `CarrierBundle.total_premium` and `CurrentPolicy.total_premium` sum correctly. `ComparisonSession` wires all models together.
