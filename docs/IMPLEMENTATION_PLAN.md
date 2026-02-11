@@ -182,7 +182,7 @@ print(quote.model_dump_json(indent=2))
 
 ---
 
-### Step 7: Validation Module
+### Step 7: Validation Module -- COMPLETE (2026-02-11)
 
 **Build:** `app/extraction/validator.py`
 
@@ -533,3 +533,21 @@ Create a desktop shortcut pointing to `run.bat`.
 - Two-phase carrier identification
 
 **Verification:** Module imports successfully; `CARRIER_HINTS` has 9 keys; `get_carrier_hints("Erie Insurance")` matches erie entry.
+
+### 2026-02-11 — Phase 2, Step 7: Validation Module
+
+**Status:** COMPLETE
+
+**Built:** `app/extraction/validator.py` — single function `validate_quote()` with 5 validation rules.
+
+**Details:**
+- `validate_quote(quote) -> tuple[InsuranceQuote, list[str]]` — never rejects, only adds warnings
+- Rule 1: `carrier_name` not empty/whitespace
+- Rule 2: `annual_premium` > 0 and < 50,000
+- Rule 3: `deductible` in standard set [250, 500, 1000, 2500, 5000, 10000] or warn "Non-standard deductible"
+- Rule 4: All `coverage_limits` values > 0
+- Rule 5: `effective_date` valid ISO format if present
+- Rule 6: `confidence` in ["high", "medium", "low"] — auto-corrects invalid values to "low" via `model_copy(update=...)`
+- Logging: WARNING for quotes with issues, INFO for clean quotes
+
+**Verification:** Bad-data test produced 4 expected warnings (premium, deductible, coverage limit, confidence). Confidence corrected from "maybe" to "low".
