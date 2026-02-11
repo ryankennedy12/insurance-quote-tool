@@ -26,7 +26,7 @@ Remove `weasyprint` from requirements.txt. The PDF generator will use `fpdf2` fa
 
 ---
 
-### Step 2: Configuration Module
+### Step 2: Configuration Module -- COMPLETE (2026-02-10)
 
 **Build:** `app/utils/config.py`
 
@@ -54,7 +54,7 @@ python -c "from app.utils.config import GEMINI_API_KEY, AGENCY_NAME; print(f'Key
 
 ---
 
-### Step 3: Logging Configuration
+### Step 3: Logging Configuration -- COMPLETE (2026-02-10)
 
 **Build:** `app/utils/logging_config.py`
 
@@ -456,3 +456,31 @@ Create a desktop shortcut pointing to `run.bat`.
 **SDK correction:** `requirements.txt` uses `google-genai>=1.0.0` (not deprecated `google-generativeai`). WeasyPrint commented out; fpdf2 is primary.
 
 **Verification:** `import streamlit, gspread, pymupdf4llm, google.genai, pydantic, jinja2` — All imports OK.
+
+### 2026-02-10 — Phase 1, Step 2: Configuration Module
+
+**Status:** COMPLETE
+
+**Built:** `app/utils/config.py` — loads `.env` via python-dotenv, exports 9 module-level constants.
+
+**Details:**
+- `GEMINI_API_KEY` validated at import time; raises `ValueError` if missing/empty
+- Env var `GOOGLE_SERVICE_ACCOUNT_FILE` maps to Python constant `GOOGLE_CREDS_PATH` (matched `.env.example` naming)
+- `MAX_UPLOAD_FILES` cast to `int`; all others are strings with sensible defaults
+
+**Verification:** `from app.utils.config import GEMINI_API_KEY, AGENCY_NAME` — Key loaded, Agency: Scioto Insurance Group.
+
+### 2026-02-10 — Phase 1, Step 3: Logging Configuration
+
+**Status:** COMPLETE
+
+**Built:** `app/utils/logging_config.py` — `setup_logging()` configures root logger.
+
+**Details:**
+- `RotatingFileHandler` → `data/logs/app.log` (5MB max, 5 backups, UTF-8 encoding)
+- `StreamHandler` → console output
+- Format: `%(asctime)s | %(levelname)-8s | %(name)s | %(message)s`
+- Auto-creates `data/logs/` directory; guard against duplicate handlers on repeated calls
+- Uses `LOG_LEVEL` from config module
+
+**Verification:** `logger.info('Test message')` — written to both console and `data/logs/app.log`.
