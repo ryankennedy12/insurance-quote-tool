@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install *)",
+      "Bash(python -m pytest *)",
+      "Bash(streamlit run *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(python -c *)",
+      "Bash(python -m *)"
+    ],
+    "deny": [
+      "Read(**/.env*)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/service-account*.json)",
+      "Read(**/secrets/**)"
+    ]
+  }
+}

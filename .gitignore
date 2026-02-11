@@ -1,0 +1,29 @@
+# Environment and secrets
+.env
+secrets/
+service_account.json
+
+# Data directories (contain PII)
+data/uploads/
+data/outputs/
+data/logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
