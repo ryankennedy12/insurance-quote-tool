@@ -12,7 +12,7 @@ from app.extraction.models import (
     CurrentPolicy,
     InsuranceQuote,
 )
-from app.utils.config import GOOGLE_CREDS_PATH, SPREADSHEET_ID
+from app.utils.config import GOOGLE_SERVICE_ACCOUNT_FILE, SPREADSHEET_ID
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +69,11 @@ class SheetsClient:
             SheetsClientError: Service account credentials not found
         """
         try:
-            self.gc = gspread.service_account(filename=GOOGLE_CREDS_PATH)
+            self.gc = gspread.service_account(filename=GOOGLE_SERVICE_ACCOUNT_FILE)
             logger.info("Authenticated with Google Sheets API")
         except FileNotFoundError as exc:
             raise SheetsClientError(
-                f"Service account credentials not found at {GOOGLE_CREDS_PATH}"
+                f"Service account credentials not found at {GOOGLE_SERVICE_ACCOUNT_FILE}"
             ) from exc
 
         try:

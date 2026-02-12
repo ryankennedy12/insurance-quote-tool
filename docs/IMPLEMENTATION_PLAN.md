@@ -767,3 +767,50 @@ Create a desktop shortcut pointing to `run.bat`.
 **Verification:** `python -c "from app.ui.streamlit_app import main; print('Streamlit app syntax check passed')"` — All imports successful, syntax valid
 
 **Next:** Step 14 (Export Stage) — PDF generation and Google Sheets export with real functionality
+
+---
+
+### 2026-02-12 — Phase 5, Step 14: Export Stage
+
+**Status:** COMPLETE
+
+**Modified files:**
+- `app/ui/streamlit_app.py` — Export stage with real PDF generation and Google Sheets export
+- `app/utils/config.py` — Renamed `GOOGLE_CREDS_PATH` → `GOOGLE_SERVICE_ACCOUNT_FILE` (Python constant now matches `.env` variable name)
+- `app/sheets/sheets_client.py` — Updated all references from `GOOGLE_CREDS_PATH` to `GOOGLE_SERVICE_ACCOUNT_FILE`
+
+**Export Stage UI (2 new helper functions):**
+- `_build_comparison_session()` — Builds `ComparisonSession` from edited data, including required `date` field (ISO format)
+- `render_export_stage()` — Replaced placeholder with full implementation
+
+**PDF Generation:**
+- "Generate PDF" button → builds `ComparisonSession` → calls `generate_comparison_pdf()` → stores path in session state
+- Download button appears after successful generation
+- Output path: `data/outputs/{client_name}_comparison_{date}.pdf`
+- Logo auto-detected from `assets/logo_transparent.png`
+
+**Google Sheets Export:**
+- "Export to Google Sheets" button → builds `ComparisonSession` → calls `SheetsClient().create_comparison()` → stores URL
+- Clickable link to Google Sheet appears after successful export
+- Graceful error handling if credentials not configured
+
+**Config rename:**
+- `.env` variable `GOOGLE_SERVICE_ACCOUNT_FILE` now matches Python constant `GOOGLE_SERVICE_ACCOUNT_FILE` (was previously aliased as `GOOGLE_CREDS_PATH`)
+- All 3 references in `sheets_client.py` updated (import, `__init__`, error message)
+
+**Imports added to streamlit_app.py:**
+- `datetime`, `logging`, `Path`
+- `generate_comparison_pdf` from `app.pdf_gen.generator`
+- `SheetsClient` from `app.sheets.sheets_client`
+
+**Verification:** `python -c "from app.ui.streamlit_app import main; print('OK')"` — All imports successful
+
+---
+
+### Phase 5 Summary
+
+**Status:** ALL STEPS COMPLETE (Steps 11-14)
+
+Full Streamlit wizard is working end-to-end: Upload → Extract → Review & Edit → Export (PDF + Google Sheets).
+
+**Pending:** Google Sheets export currently requires a pre-existing "Template" worksheet. Next task is a template-free rewrite of `sheets_client.py` to build sheets programmatically with formatting via `gspread` batch API.

@@ -18,8 +18,7 @@ OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
 SPREADSHEET_ID: str = os.getenv("SPREADSHEET_ID", "")
 
 # --- Google Sheets credentials ---
-# .env.example uses GOOGLE_SERVICE_ACCOUNT_FILE; Python constant keeps the shorter name
-GOOGLE_CREDS_PATH: str = os.getenv(
+GOOGLE_SERVICE_ACCOUNT_FILE: str = os.getenv(
     "GOOGLE_SERVICE_ACCOUNT_FILE", "./secrets/service_account.json"
 )
 

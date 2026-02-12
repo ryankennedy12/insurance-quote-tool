@@ -1,20 +1,22 @@
 """
 Streamlit UI — Insurance Quote Comparison Tool
-Phase 5, Steps 12-13: Upload Stage + Review & Edit Stage
+Phase 5, Steps 12-14: Upload, Review & Edit, Export Stages
 
 Entry point: streamlit run app/ui/streamlit_app.py
 """
 
 import streamlit as st
+import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from app.extraction.models import ComparisonSession, CarrierBundle, CurrentPolicy, InsuranceQuote, CoverageLimits
 from app.extraction.ai_extractor import extract_and_validate
+from app.pdf_gen.generator import generate_comparison_pdf
+from app.sheets.sheets_client import SheetsClient
 
-# Future imports (not needed yet):
-# from app.sheets.sheets_client import SheetsClient
-# from app.pdf_gen.generator import generate_comparison_pdf
+logger = logging.getLogger(__name__)
 
 
 def init_session_state() -> None:
@@ -1094,22 +1096,114 @@ def render_review_stage() -> None:
             st.rerun()
 
 
-def render_export_stage() -> None:
-    """Step 3: Export — placeholder UI."""
-    # Agent Notes
-    st.text_area(
-        "Agent Notes (optional — appears on PDF)",
-        key="agent_notes",
-        height=100
+def _build_comparison_session() -> ComparisonSession:
+    """Build ComparisonSession from edited data for export."""
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    return ComparisonSession(
+        client_name=st.session_state.client_name,
+        date=date_str,
+        sections_included=st.session_state.sections_included,
+        carriers=st.session_state.edited_bundles,
+        current_policy=st.session_state.edited_current_policy,
+        agent_notes=st.session_state.get("agent_notes", "").strip() or None,
     )
 
-    st.info("Export buttons will go here (Step 14)")
 
-    col1, col2, col3 = st.columns(3)
+def render_export_stage() -> None:
+    """Step 3: Export — PDF generation and Google Sheets export."""
+    # Agent Notes
+    st.text_area(
+        "Agent Notes (optional — appears on PDF and Sheet)",
+        key="agent_notes",
+        height=100,
+        placeholder="Add any notes for the client...",
+    )
+
+    st.markdown("---")
+
+    # ── PDF Section ──
+    st.subheader("PDF Comparison Report")
+
+    col1, col2 = st.columns([1, 3])
     with col1:
-        st.button("📄 Generate PDF", disabled=True)
-    with col2:
-        st.button("📊 Export to Google Sheets", disabled=True)
+        generate_pdf_btn = st.button("Generate PDF", type="primary")
+
+    if generate_pdf_btn:
+        with st.spinner("Generating PDF..."):
+            try:
+                session = _build_comparison_session()
+
+                output_dir = Path("data/outputs")
+                output_dir.mkdir(parents=True, exist_ok=True)
+
+                safe_name = session.client_name.replace(" ", "_")
+                date_str = datetime.now().strftime("%Y-%m-%d")
+                output_path = str(output_dir / f"{safe_name}_comparison_{date_str}.pdf")
+
+                logo_path = "assets/logo_transparent.png"
+                if not Path(logo_path).exists():
+                    logo_path = None
+
+                result_path = generate_comparison_pdf(
+                    session=session,
+                    output_path=output_path,
+                    logo_path=logo_path,
+                    date_str=date_str,
+                    agent_notes=session.agent_notes,
+                )
+
+                st.session_state.export_pdf_path = result_path
+                st.success("PDF generated successfully!")
+
+            except Exception as e:
+                st.error(f"PDF generation failed: {e}")
+                logger.error("PDF generation error", exc_info=True)
+
+    # Show download button if PDF exists
+    if st.session_state.get("export_pdf_path"):
+        pdf_path = st.session_state.export_pdf_path
+        if Path(pdf_path).exists():
+            with open(pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+            st.download_button(
+                label="Download PDF",
+                data=pdf_bytes,
+                file_name=Path(pdf_path).name,
+                mime="application/pdf",
+            )
+
+    st.markdown("---")
+
+    # ── Google Sheets Section ──
+    st.subheader("Google Sheets Export")
+
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        generate_sheets_btn = st.button("Export to Google Sheets", type="primary")
+
+    if generate_sheets_btn:
+        with st.spinner("Exporting to Google Sheets..."):
+            try:
+                session = _build_comparison_session()
+
+                sheets_client = SheetsClient()
+                sheet_url = sheets_client.create_comparison(session)
+
+                st.session_state.export_sheet_url = sheet_url
+                st.success("Google Sheet created!")
+
+            except Exception as e:
+                st.error(f"Sheets export failed: {e}")
+                logger.error("Sheets export error", exc_info=True)
+
+    # Show link if Sheet was created
+    if st.session_state.get("export_sheet_url"):
+        st.markdown(f"[Open Google Sheet]({st.session_state.export_sheet_url})")
+
+    st.markdown("---")
+
+    # Re-export info
+    st.info("You can re-generate exports after making changes. Go back to Review to edit data.")
 
 
 def render_sidebar() -> None:
