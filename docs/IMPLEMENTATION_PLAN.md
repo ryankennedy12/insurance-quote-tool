@@ -715,3 +715,55 @@ Create a desktop shortcut pointing to `run.bat`.
 **Verified:** Erie and Progressive home quotes extracted successfully through Streamlit UI on Windows.
 
 **Next:** Step 13 (Review Stage) per `docs/STREAMLIT_STEP13_SPEC.md`
+
+---
+
+### 2026-02-12 — Phase 5, Step 13: Review & Edit Stage
+
+**Status:** COMPLETE
+
+**Modified files:**
+- `app/ui/streamlit_app.py` — Review stage with editable carrier data and current policy forms
+
+**Review Stage UI (6 new helper functions):**
+- `_render_coverage_limits_editor(carrier_idx, section, quote)` — Section-specific coverage fields (home: 6 fields, auto: 7 fields, umbrella: 1 field)
+- `_render_carrier_editor(idx, bundle)` — Complete carrier editor: premiums, coverage limits, deductibles, endorsements, discounts, notes
+- `_build_edited_quote(carrier_idx, section, original)` — Reconstruct InsuranceQuote from session state values
+- `_build_edited_bundles()` — Reconstruct list[CarrierBundle] from all edited session state
+- `_build_edited_current_policy()` — Reconstruct CurrentPolicy from edited session state
+- `render_review_stage()` — Replaced placeholder with full implementation
+
+**UI Features:**
+- Extraction warnings displayed at top (expandable, auto-expanded if present)
+- Current Policy editor (if exists): editable fields for home/auto/umbrella with 0.0 → None conversion
+- Per-carrier editors: one expander per carrier (first expanded by default)
+  - Premium inputs for each policy section
+  - Coverage limits with section-specific field sets
+  - Home deductibles: All-Peril + Wind/Hail
+  - Endorsements: Deduplicated across sections, multi-line text area
+  - Discounts: Deduplicated across sections, multi-line text area
+  - Notes: Combined from all sections with [Section] prefixes
+- Approve & Continue button: Builds edited models, stores in session state, advances to Step 3
+
+**Field Name Corrections (actual model fields used):**
+- `InsuranceQuote.discounts_applied` (NOT `discounts`)
+- `CoverageLimits` auto: `comprehensive`, `collision`, `um_uim` (NOT `comp_deductible`, `collision_deductible`, `um_bi_per_person`, etc.)
+- Preserves non-editable fields: `policy_type`, `effective_date`, `expiration_date`, `confidence`, `raw_source`, `exclusions`, `monthly_premium`
+
+**Session State Keys:**
+- Current policy: `edit_cp_{field_name}` (e.g., `edit_cp_home_premium`)
+- Carrier premiums: `edit_carrier_{idx}_{section}_premium`
+- Coverage limits: `edit_carrier_{idx}_{section}_{field}` (e.g., `edit_carrier_0_home_dwelling`)
+- Shared text areas: `edit_carrier_{idx}_endorsements`, `edit_carrier_{idx}_discounts`, `edit_carrier_{idx}_notes`
+
+**Data Flow:**
+- Step 12 stores: `carrier_bundles`, `current_policy_data`, `extraction_warnings`
+- Step 13 works with: Deep copies via session state widgets
+- Step 13 stores on Approve: `edited_bundles`, `edited_current_policy`, `review_complete = True`, `current_step = 3`
+
+**Import Updates:**
+- Added `CoverageLimits` to imports from `app.extraction.models`
+
+**Verification:** `python -c "from app.ui.streamlit_app import main; print('Streamlit app syntax check passed')"` — All imports successful, syntax valid
+
+**Next:** Step 14 (Export Stage) — PDF generation and Google Sheets export with real functionality
