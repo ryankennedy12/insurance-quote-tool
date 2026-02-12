@@ -4,7 +4,7 @@ import logging
 from typing import Any, Callable, Optional
 
 import gspread
-from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
+from gspread.exceptions import APIError, SpreadsheetNotFound
 
 from app.extraction.models import (
     CarrierBundle,
@@ -32,11 +32,6 @@ class SpreadsheetNotFoundError(SheetsClientError):
     pass
 
 
-class TemplateNotFoundError(SheetsClientError):
-    """Template worksheet not found in spreadsheet."""
-    pass
-
-
 class PermissionDeniedError(SheetsClientError):
     """Service account lacks permission to access spreadsheet."""
     pass
@@ -48,6 +43,48 @@ class QuotaExceededError(SheetsClientError):
 
 
 # ============================================================================
+# Formatting Constants
+# ============================================================================
+
+MAROON_BG: dict = {"red": 0.529, "green": 0.110, "blue": 0.188}
+WHITE_TEXT: dict = {"red": 1.0, "green": 1.0, "blue": 1.0}
+LIGHT_GRAY_BG: dict = {"red": 0.973, "green": 0.973, "blue": 0.973}
+
+ROW_LABELS: list[str] = [
+    "",                    # Row 1: title (handled separately)
+    "",                    # Row 2: date (handled separately)
+    "",                    # Row 3: carrier names (handled separately)
+    "Auto Premium",        # Row 4
+    "Home Premium",        # Row 5
+    "Umbrella Premium",    # Row 6
+    "Total",               # Row 7
+    "",                    # Row 8: blank separator
+    "Home Coverage",       # Row 9: section header
+    "Dwelling",            # Row 10
+    "Other Structures",    # Row 11
+    "Liability",           # Row 12
+    "Personal Property",   # Row 13
+    "Loss of Use",         # Row 14
+    "Deductible",          # Row 15
+    "",                    # Row 16: blank separator
+    "Auto Coverage",       # Row 17: section header
+    "Limits",              # Row 18
+    "UM/UIM",              # Row 19
+    "Comprehensive",       # Row 20
+    "Collision",           # Row 21
+    "",                    # Row 22: blank separator
+    "Umbrella Coverage",   # Row 23: section header
+    "Limits",              # Row 24
+    "Deductible",          # Row 25
+]
+
+HEADER_ROWS: list[int] = [1, 3, 9, 17, 23]
+CURRENCY_ROWS: list[int] = [4, 5, 6, 7, 10, 11, 12, 13, 14, 15]
+LABEL_COL_WIDTH: int = 140
+DATA_COL_WIDTH: int = 120
+
+
+# ============================================================================
 # Main Client Class
 # ============================================================================
 
@@ -56,7 +93,7 @@ class SheetsClient:
     """Google Sheets integration for multi-policy comparison output.
 
     Transforms a ComparisonSession into a fixed 25-row Google Sheets
-    layout matching the agency's template structure.
+    layout with programmatic formatting — no template dependency.
     """
 
     def __init__(self) -> None:
@@ -107,7 +144,6 @@ class SheetsClient:
             Worksheet URL (https://docs.google.com/spreadsheets/d/{id}/edit#gid={gid})
 
         Raises:
-            TemplateNotFoundError: "Template" worksheet not found
             QuotaExceededError: API quota exceeded
             SheetsClientError: Other API errors
         """
@@ -117,26 +153,31 @@ class SheetsClient:
         )
 
         try:
-            # 1. Duplicate template worksheet
-            new_ws = self._duplicate_template(session.client_name, session.date)
+            num_data_cols = self._get_num_data_columns(session)
 
-            # 2. Build data grid
-            grid = self._build_data_grid(session)
+            # 1. Create blank worksheet
+            new_ws = self._create_worksheet(
+                session.client_name, session.date, num_data_cols
+            )
 
-            # 3. Write to worksheet
+            # 2. Build full grid (all 25 rows including labels and headers)
+            grid = self._build_full_grid(session, num_data_cols)
+
+            # 3. Write to worksheet at A1
             self._write_to_worksheet(new_ws, grid)
 
-            # 4. Construct URL
-            url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit#gid={new_ws.id}"
+            # 4. Apply formatting
+            self._apply_formatting(new_ws, num_data_cols)
+
+            # 5. Construct URL
+            url = (
+                f"https://docs.google.com/spreadsheets/d/"
+                f"{SPREADSHEET_ID}/edit#gid={new_ws.id}"
+            )
 
             logger.info("Comparison created: %s", url)
             return url
 
-        except WorksheetNotFound as exc:
-            raise TemplateNotFoundError(
-                'Template worksheet not found. '
-                'Create a worksheet named "Template" in the spreadsheet.'
-            ) from exc
         except APIError as exc:
             if exc.response.status_code == 429:
                 raise QuotaExceededError(
@@ -485,104 +526,34 @@ class SheetsClient:
         return row
 
     # ========================================================================
-    # Main Grid Builder
+    # Worksheet Operations
     # ========================================================================
 
-    def _build_data_grid(self, session: ComparisonSession) -> list[list[Any]]:
-        """Build 22-row x 7-column grid (rows 4-25, columns B-H).
+    def _get_num_data_columns(self, session: ComparisonSession) -> int:
+        """Return number of data columns (excluding label column A).
 
         Args:
             session: Comparison session
 
         Returns:
-            Grid as list of lists, ready for batch update at B4
+            Number of data columns
         """
-        grid = []
+        return len(session.carriers[:6]) + (1 if session.current_policy else 0)
 
-        # Row 4: Auto Premium
-        grid.append(self._build_premium_row(
-            session,
-            lambda cp: cp.auto_premium,
-            lambda cb: cb.auto.annual_premium if cb.auto else None
-        ))
-
-        # Row 5: Home Premium
-        grid.append(self._build_premium_row(
-            session,
-            lambda cp: cp.home_premium,
-            lambda cb: cb.home.annual_premium if cb.home else None
-        ))
-
-        # Row 6: Umbrella Premium
-        grid.append(self._build_premium_row(
-            session,
-            lambda cp: cp.umbrella_premium,
-            lambda cb: cb.umbrella.annual_premium if cb.umbrella else None
-        ))
-
-        # Row 7: Total
-        grid.append(self._build_total_row(session))
-
-        # Row 8: Blank separator
-        grid.append([""] * 7)
-
-        # Row 9: Home section header (template handles this)
-        grid.append([""] * 7)
-
-        # Rows 10-15: Home details (conditional on sections_included)
-        if "home" in session.sections_included:
-            grid.extend(self._build_home_section(session))
-        else:
-            grid.extend([[""] * 7] * 6)
-
-        # Row 16: Blank separator
-        grid.append([""] * 7)
-
-        # Row 17: Auto section header (template handles this)
-        grid.append([""] * 7)
-
-        # Rows 18-21: Auto details (conditional on sections_included)
-        if "auto" in session.sections_included:
-            grid.extend(self._build_auto_section(session))
-        else:
-            grid.extend([[""] * 7] * 4)
-
-        # Row 22: Blank separator
-        grid.append([""] * 7)
-
-        # Row 23: Umbrella section header (template handles this)
-        grid.append([""] * 7)
-
-        # Rows 24-25: Umbrella details (conditional on sections_included)
-        if "umbrella" in session.sections_included:
-            grid.extend(self._build_umbrella_section(session))
-        else:
-            grid.extend([[""] * 7] * 2)
-
-        logger.debug("Built grid: %d rows x %d columns", len(grid), len(grid[0]) if grid else 0)
-        return grid
-
-    # ========================================================================
-    # Worksheet Operations
-    # ========================================================================
-
-    def _duplicate_template(self, client_name: str, date: str) -> gspread.Worksheet:
-        """Duplicate Template worksheet with unique name.
+    def _create_worksheet(
+        self, client_name: str, date: str, num_data_cols: int
+    ) -> gspread.Worksheet:
+        """Create blank worksheet with unique name.
 
         Args:
             client_name: Client name for worksheet title
             date: ISO date string (YYYY-MM-DD)
+            num_data_cols: Number of data columns
 
         Returns:
-            New duplicated worksheet
-
-        Raises:
-            WorksheetNotFound: Template worksheet not found
+            New blank worksheet
         """
         base_name = f"Quote_{client_name}_{date}"
-
-        # Find Template worksheet
-        template_ws = self.spreadsheet.worksheet("Template")
 
         # Check for existing worksheets with same name
         existing_names = [ws.title for ws in self.spreadsheet.worksheets()]
@@ -594,26 +565,304 @@ class SheetsClient:
             worksheet_name = f"{base_name}_{counter}"
             counter += 1
 
-        # Duplicate
-        new_ws = template_ws.duplicate(new_sheet_name=worksheet_name)
+        # Create blank worksheet
+        new_ws = self.spreadsheet.add_worksheet(
+            title=worksheet_name,
+            rows=25,
+            cols=1 + num_data_cols,
+        )
 
-        logger.info("Duplicated Template → %s", worksheet_name)
+        logger.info("Created worksheet: %s", worksheet_name)
         return new_ws
+
+    # ========================================================================
+    # Main Grid Builder
+    # ========================================================================
+
+    def _build_full_grid(
+        self, session: ComparisonSession, num_data_cols: int
+    ) -> list[list[Any]]:
+        """Build 25-row grid starting at A1 with labels, headers, and data.
+
+        Args:
+            session: Comparison session
+            num_data_cols: Number of data columns
+
+        Returns:
+            25-row grid ready for writing at A1
+        """
+        total_cols = 1 + num_data_cols
+
+        def pad_row(helper_row: list[Any]) -> list[Any]:
+            """Trim helper row to num_data_cols, stripping current col if needed."""
+            if not session.current_policy:
+                data = helper_row[1:]  # Skip leading "-" (no current policy column)
+            else:
+                data = helper_row
+            return (data + [""] * num_data_cols)[:num_data_cols]
+
+        def label_row(row_idx: int, helper_row: list[Any]) -> list[Any]:
+            """Prepend row label to trimmed helper row."""
+            return [ROW_LABELS[row_idx]] + pad_row(helper_row)
+
+        def empty_row() -> list[Any]:
+            return [""] * total_cols
+
+        def section_header(row_idx: int) -> list[Any]:
+            return [ROW_LABELS[row_idx]] + [""] * num_data_cols
+
+        grid: list[list[Any]] = []
+
+        # Row 1: Title (merged across all columns)
+        grid.append(
+            [f"Quote Comparison \u2014 {session.client_name}"] + [""] * num_data_cols
+        )
+
+        # Row 2: Date
+        grid.append([session.date] + [""] * num_data_cols)
+
+        # Row 3: Carrier names header
+        carrier_header: list[Any] = [""]
+        if session.current_policy:
+            current_name = session.current_policy.carrier_name or "Current"
+            carrier_header.append(f"Current: {current_name}")
+        for carrier in session.carriers[:6]:
+            carrier_header.append(carrier.carrier_name)
+        carrier_header = (carrier_header + [""] * total_cols)[:total_cols]
+        grid.append(carrier_header)
+
+        # Row 4: Auto Premium
+        grid.append(label_row(3, self._build_premium_row(
+            session,
+            lambda cp: cp.auto_premium,
+            lambda cb: cb.auto.annual_premium if cb.auto else None
+        )))
+
+        # Row 5: Home Premium
+        grid.append(label_row(4, self._build_premium_row(
+            session,
+            lambda cp: cp.home_premium,
+            lambda cb: cb.home.annual_premium if cb.home else None
+        )))
+
+        # Row 6: Umbrella Premium
+        grid.append(label_row(5, self._build_premium_row(
+            session,
+            lambda cp: cp.umbrella_premium,
+            lambda cb: cb.umbrella.annual_premium if cb.umbrella else None
+        )))
+
+        # Row 7: Total
+        grid.append(label_row(6, self._build_total_row(session)))
+
+        # Row 8: Blank separator
+        grid.append(empty_row())
+
+        # Row 9: Home Coverage section header
+        grid.append(section_header(8))
+
+        # Rows 10-15: Home details
+        if "home" in session.sections_included:
+            for i, row in enumerate(self._build_home_section(session)):
+                grid.append(label_row(9 + i, row))
+        else:
+            for i in range(6):
+                grid.append([ROW_LABELS[9 + i]] + [""] * num_data_cols)
+
+        # Row 16: Blank separator
+        grid.append(empty_row())
+
+        # Row 17: Auto Coverage section header
+        grid.append(section_header(16))
+
+        # Rows 18-21: Auto details
+        if "auto" in session.sections_included:
+            for i, row in enumerate(self._build_auto_section(session)):
+                grid.append(label_row(17 + i, row))
+        else:
+            for i in range(4):
+                grid.append([ROW_LABELS[17 + i]] + [""] * num_data_cols)
+
+        # Row 22: Blank separator
+        grid.append(empty_row())
+
+        # Row 23: Umbrella Coverage section header
+        grid.append(section_header(22))
+
+        # Rows 24-25: Umbrella details
+        if "umbrella" in session.sections_included:
+            for i, row in enumerate(self._build_umbrella_section(session)):
+                grid.append(label_row(23 + i, row))
+        else:
+            for i in range(2):
+                grid.append([ROW_LABELS[23 + i]] + [""] * num_data_cols)
+
+        logger.debug(
+            "Built grid: %d rows x %d columns", len(grid), total_cols
+        )
+        return grid
+
+    # ========================================================================
+    # Write & Format
+    # ========================================================================
 
     def _write_to_worksheet(
         self,
         worksheet: gspread.Worksheet,
         grid: list[list[Any]]
     ) -> None:
-        """Write data grid to worksheet starting at B4.
-
-        Uses single batch update for efficiency (gspread v6.1+ API).
+        """Write data grid to worksheet starting at A1.
 
         Args:
             worksheet: Target worksheet
-            grid: 22x7 grid of data (rows 4-25, columns B-H)
+            grid: 25-row grid of data
         """
-        # gspread v6.1+ syntax: values first, then range
-        worksheet.update(grid, 'B4')
-
+        worksheet.update(grid, 'A1')
         logger.info("Wrote %d rows to worksheet %s", len(grid), worksheet.title)
+
+    def _apply_formatting(
+        self, worksheet: gspread.Worksheet, num_data_cols: int
+    ) -> None:
+        """Apply all formatting to worksheet.
+
+        Uses batch_format() for cell formatting and spreadsheet.batch_update()
+        for column widths and cell merge.
+
+        Args:
+            worksheet: Target worksheet
+            num_data_cols: Number of data columns
+        """
+        last_col = chr(ord('A') + num_data_cols)
+        sheet_id = worksheet.id
+
+        # Build format rules list
+        formats: list[dict] = []
+
+        # --- Maroon headers (rows 1, 3, 9, 17, 23) ---
+        maroon_fmt = {
+            "backgroundColor": MAROON_BG,
+            "horizontalAlignment": "CENTER",
+            "textFormat": {
+                "foregroundColor": WHITE_TEXT,
+                "bold": True,
+            },
+        }
+        for row in HEADER_ROWS:
+            formats.append({
+                "range": f"A{row}:{last_col}{row}",
+                "format": maroon_fmt,
+            })
+
+        # --- Bold total (row 7) ---
+        formats.append({
+            "range": f"A7:{last_col}7",
+            "format": {"textFormat": {"bold": True}},
+        })
+
+        # --- Currency formatting (rows 4-7, 10-15) on data columns only ---
+        for row in CURRENCY_ROWS:
+            formats.append({
+                "range": f"B{row}:{last_col}{row}",
+                "format": {
+                    "numberFormat": {
+                        "type": "CURRENCY",
+                        "pattern": '"$"#,##0',
+                    },
+                },
+            })
+
+        # --- Alternating gray shading on even data rows ---
+        even_data_rows = [4, 6, 10, 12, 14, 18, 20, 24]
+        for row in even_data_rows:
+            formats.append({
+                "range": f"A{row}:{last_col}{row}",
+                "format": {"backgroundColor": LIGHT_GRAY_BG},
+            })
+
+        # --- Thin borders (A3 through last_col:25) ---
+        thin_border = {
+            "style": "SOLID",
+            "color": {"red": 0.8, "green": 0.8, "blue": 0.8},
+        }
+        formats.append({
+            "range": f"A3:{last_col}25",
+            "format": {
+                "borders": {
+                    "top": thin_border,
+                    "bottom": thin_border,
+                    "left": thin_border,
+                    "right": thin_border,
+                },
+            },
+        })
+
+        # --- Data alignment: center for data cols ---
+        formats.append({
+            "range": f"B4:{last_col}25",
+            "format": {"horizontalAlignment": "CENTER"},
+        })
+
+        # --- Label alignment: left for column A ---
+        formats.append({
+            "range": "A4:A25",
+            "format": {"horizontalAlignment": "LEFT"},
+        })
+
+        # --- Date row: italic, left ---
+        formats.append({
+            "range": f"A2:{last_col}2",
+            "format": {
+                "textFormat": {"italic": True},
+                "horizontalAlignment": "LEFT",
+            },
+        })
+
+        # Apply all cell formatting in one call
+        worksheet.batch_format(formats)
+        logger.info("Applied %d format rules", len(formats))
+
+        # --- Column widths + row 1 merge via raw batch_update ---
+        requests: list[dict] = [
+            # Column A width
+            {
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": 0,
+                        "endIndex": 1,
+                    },
+                    "properties": {"pixelSize": LABEL_COL_WIDTH},
+                    "fields": "pixelSize",
+                },
+            },
+            # Data columns width (B through last)
+            {
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": 1,
+                        "endIndex": 1 + num_data_cols,
+                    },
+                    "properties": {"pixelSize": DATA_COL_WIDTH},
+                    "fields": "pixelSize",
+                },
+            },
+            # Merge row 1 across all columns
+            {
+                "mergeCells": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 0,
+                        "endRowIndex": 1,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": 1 + num_data_cols,
+                    },
+                    "mergeType": "MERGE_ALL",
+                },
+            },
+        ]
+
+        self.spreadsheet.batch_update({"requests": requests})
+        logger.info("Applied column widths and row 1 merge")
