@@ -813,4 +813,4 @@ Create a desktop shortcut pointing to `run.bat`.
 
 Full Streamlit wizard is working end-to-end: Upload → Extract → Review & Edit → Export (PDF + Google Sheets).
 
-**Pending:** Google Sheets export currently requires a pre-existing "Template" worksheet. Next task is a template-free rewrite of `sheets_client.py` to build sheets programmatically with formatting via `gspread` batch API.
+**Pending:** Google Sheets export currently requires a pre-existing "Template" worksheet. Next task is a template-free rewrite of `sheets_client.py` to build sheets programmatically with formatting via `gspread` batch API. See `docs/SHEETS_REWRITE_PLAN.md` for the full plan.
