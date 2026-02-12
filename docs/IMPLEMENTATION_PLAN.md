@@ -621,3 +621,23 @@ Create a desktop shortcut pointing to `run.bat`.
   - `_ensure_space()`, `_space_remaining()`: Auto page breaks before footer zone
 
 **Verification:** `python -c "from app.pdf_gen.generator import generate_comparison_pdf; print('PDF generator imports OK')"` — PDF generator imports OK
+
+**Bug Fix:** Line 343 — Replaced Unicode ellipsis "…" with ASCII "..." for Helvetica/Latin-1 compatibility (Windows encoding issue)
+
+**Visual Testing:**
+- Created `tests/test_pdf_visual.py` — Standalone test script that generates 4 sample PDFs with realistic Ohio insurance data
+- Test scenarios:
+  - `test_2carriers_current.pdf`: 2 carriers + current policy, home only (portrait)
+  - `test_3carriers_current.pdf`: 3 carriers + current policy, home + auto (portrait)
+  - `test_5carriers_current.pdf`: 5 carriers + current policy, home + auto + umbrella (landscape)
+  - `test_3carriers_no_current.pdf`: 3 carriers, no current policy, home + auto, with agent notes
+- Uses realistic carriers: Erie Insurance, Westfield, State Farm, Nationwide, Grange Insurance, Progressive
+- Includes endorsements, discounts, per-carrier notes, mix of numeric and text coverage values (e.g., "ALS" for Actual Loss Sustained)
+- All PDFs output to `data/outputs/` directory
+
+**Logo Asset Creation:**
+- Created `scripts/make_logo_transparent.py` — Pillow-based background removal script
+- Samples corner pixels to detect maroon background color RGB(120, 34, 39)
+- Replaces similar-colored pixels (tolerance=30) with transparency
+- Generated `assets/logo_transparent.png` — 90.2% of pixels made transparent
+- Visual test suite now uses transparent logo for seamless header integration

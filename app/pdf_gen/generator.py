@@ -340,7 +340,7 @@ class SciotoComparisonPDF(FPDF):
             self.set_text_color(*BRAND["white"])
             name = carrier.carrier_name
             if data_col_w < 35 and len(name) > 14:
-                name = name[:13] + "…"
+                name = name[:13] + "..."
             self.cell(data_col_w, 10, name, border=1, fill=True, align="C")
             col_idx += 1
 
