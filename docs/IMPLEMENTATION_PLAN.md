@@ -679,3 +679,63 @@ Create a desktop shortcut pointing to `run.bat`.
 - Real logic deferred to Steps 12-14
 
 **Verification:** `python app/ui/streamlit_app.py` — All imports OK, script executes without errors (ScriptRunContext warnings expected when running directly)
+
+---
+
+### 2026-02-11 — Phase 5, Step 12: Upload Stage with Real Logic (WIP)
+
+**Status:** IN PROGRESS (temp file fix pending)
+
+**Modified files:**
+- `app/ui/streamlit_app.py` (+486 lines, 209→695 lines total)
+- `app/extraction/ai_extractor.py` (Windows file locking fix)
+
+**Completed:**
+- **7 helper functions added:**
+  - `_build_current_policy_from_form()` — Builds CurrentPolicy from form state (cp_* keys), converts 0.0→None
+  - `_build_current_policy_from_quote()` — Maps InsuranceQuote→CurrentPolicy (home fields only per spec)
+  - `_validate_upload_stage()` — Pre-extraction validation (client name, sections, carriers, PDFs, duplicates)
+  - `_add_carrier_callback()` — Adds carrier slot (max 6) via on_click callback
+  - `_remove_carrier_callback(index)` — Removes carrier slot (min 2) via on_click callback
+  - `_render_current_policy_manual_form()` — Section-adaptive form (🏠 7 fields, 🚗 5 fields, ☂️ 3 fields)
+  - `_render_current_policy_upload()` — File uploader + Extract button for current policy PDF
+
+- **Current Policy Entry (3 modes):**
+  - Skip: No action
+  - Enter Manually: Expandable form with two-column layout, dynamic fields based on sections_included
+  - Upload Dec Page PDF: File uploader + extraction button, maps to home fields only, shows info note
+
+- **Dynamic Carrier Upload:**
+  - 2-6 carriers with bordered containers
+  - Name text input + remove button (on_click callback) per carrier
+  - File uploaders responsive to sections_included (columns)
+  - Add Another Carrier button (disabled at 6)
+
+- **Extract All Button:**
+  - Validation with detailed error messages
+  - Progress bar (fraction complete) + status widget (detailed log)
+  - Non-blocking failures (collected as warnings)
+  - Success summary + warnings expander
+  - Auto-rerun to Step 2 after completion
+  - Resets Steps 2 and 3 state on re-extraction
+
+**Pending:**
+- **Windows file locking fix in ai_extractor.py:**
+  - Changed from `NamedTemporaryFile` to `tempfile.mkstemp()` pattern
+  - Uses raw file descriptor (`os.write()`, `os.close()`) before `client.files.upload()`
+  - Pattern: create temp file → write bytes → close fd → upload → cleanup in finally block
+  - **Testing required:** Need to verify extraction works on Windows with real PDFs
+
+**Implementation details:**
+- All carrier mutations use on_click callbacks (not deferred removal)
+- 0.0 number_input defaults converted to None (not real values)
+- Loss of Use field: text_input supports "ALS", parses to float if numeric, stores None otherwise
+- Duplicate carrier name validation
+- Form uses session_state keys: cp_carrier_name, cp_home_premium, etc.
+- Carriers stored as list of dicts: {name, home_pdf, auto_pdf, umbrella_pdf}
+
+**Next steps:**
+1. Test extraction with real PDFs on Windows
+2. Verify mkstemp file locking fix resolves WinError 32
+3. Manual testing checklist (16 scenarios from plan)
+4. Move to Step 13: Review Stage (editable data tables)

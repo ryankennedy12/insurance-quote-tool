@@ -206,11 +206,15 @@ def _call_gemini_multimodal(pdf_bytes: bytes, system_prompt: str) -> InsuranceQu
         temperature=0,
     )
 
+    tmp_fd = None
     tmp_path: str | None = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(pdf_bytes)
-            tmp_path = tmp.name
+        # Use mkstemp to get raw file descriptor (Windows-compatible)
+        # mkstemp returns (fd, path) - we must close fd before Gemini reads file
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
+        os.write(tmp_fd, pdf_bytes)
+        os.close(tmp_fd)  # Close file descriptor immediately
+        tmp_fd = None  # Mark as closed
 
         uploaded_file = client.files.upload(file=tmp_path)
 
@@ -228,6 +232,13 @@ def _call_gemini_multimodal(pdf_bytes: bytes, system_prompt: str) -> InsuranceQu
             config=config,
         )
     finally:
+        # Clean up file descriptor if still open
+        if tmp_fd is not None:
+            try:
+                os.close(tmp_fd)
+            except OSError:
+                pass
+        # Clean up temp file
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
