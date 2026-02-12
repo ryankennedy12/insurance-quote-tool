@@ -151,6 +151,26 @@ def get_carrier_hints(carrier_name: str) -> str:
     return CARRIER_HINTS["default"]
 
 
+def _clean_schema_for_gemini(schema: dict) -> dict:
+    """Remove unsupported properties from schema for Gemini structured output."""
+    for key in ("additionalProperties", "examples", "title", "default"):
+        schema.pop(key, None)
+    for key, value in schema.items():
+        if isinstance(value, dict):
+            _clean_schema_for_gemini(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    _clean_schema_for_gemini(item)
+    for prop in schema.get("properties", {}).values():
+        if isinstance(prop, dict):
+            _clean_schema_for_gemini(prop)
+    for defn in schema.get("$defs", {}).values():
+        if isinstance(defn, dict):
+            _clean_schema_for_gemini(defn)
+    return schema
+
+
 def _parse_response(response_text: str) -> InsuranceQuote:
     """Parse Gemini JSON response into InsuranceQuote, with json-repair fallback."""
     try:
@@ -177,10 +197,11 @@ def _parse_response(response_text: str) -> InsuranceQuote:
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def _call_gemini_text(text: str, system_prompt: str) -> InsuranceQuote:
     """Send extracted markdown text to Gemini for structured extraction."""
+    clean_schema = _clean_schema_for_gemini(InsuranceQuote.model_json_schema())
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,
         response_mime_type="application/json",
-        response_schema=InsuranceQuote,
+        response_schema=clean_schema,
         temperature=0,
     )
 
@@ -190,8 +211,10 @@ def _call_gemini_text(text: str, system_prompt: str) -> InsuranceQuote:
         config=config,
     )
 
-    # Prefer SDK-parsed Pydantic object; fall back to manual parse
+    # SDK returns a dict when using dict schema; convert to Pydantic model
     if response.parsed is not None:
+        if isinstance(response.parsed, dict):
+            return InsuranceQuote.model_validate(response.parsed)
         return response.parsed
     return _parse_response(response.text)
 
@@ -199,10 +222,11 @@ def _call_gemini_text(text: str, system_prompt: str) -> InsuranceQuote:
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def _call_gemini_multimodal(pdf_bytes: bytes, system_prompt: str) -> InsuranceQuote:
     """Send raw PDF to Gemini for multimodal extraction (scanned docs)."""
+    clean_schema = _clean_schema_for_gemini(InsuranceQuote.model_json_schema())
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,
         response_mime_type="application/json",
-        response_schema=InsuranceQuote,
+        response_schema=clean_schema,
         temperature=0,
     )
 
@@ -242,7 +266,10 @@ def _call_gemini_multimodal(pdf_bytes: bytes, system_prompt: str) -> InsuranceQu
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
+    # SDK returns a dict when using dict schema; convert to Pydantic model
     if response.parsed is not None:
+        if isinstance(response.parsed, dict):
+            return InsuranceQuote.model_validate(response.parsed)
         return response.parsed
     return _parse_response(response.text)
 

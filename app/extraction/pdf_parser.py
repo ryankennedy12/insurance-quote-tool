@@ -1,8 +1,6 @@
 import logging
-import os
-import tempfile
 
-import fitz  # pymupdf — used for page count
+import fitz  # pymupdf — used for page count and in-memory open
 import pymupdf4llm
 
 logger = logging.getLogger(__name__)
@@ -16,15 +14,9 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> tuple[str, bool]:
         chars per page > 100 (indicating machine-generated text, not a scan).
         On any error, returns ("", False).
     """
-    tmp_path: str | None = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(pdf_bytes)
-            tmp_path = tmp.name
-
-        markdown_text: str = pymupdf4llm.to_markdown(tmp_path)
-
-        doc = fitz.open(tmp_path)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        markdown_text: str = pymupdf4llm.to_markdown(doc)
         num_pages = len(doc)
         doc.close()
 
@@ -42,7 +34,3 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> tuple[str, bool]:
     except Exception:
         logger.error("Failed to extract text from PDF", exc_info=True)
         return "", False
-
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)

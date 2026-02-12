@@ -30,7 +30,7 @@ def validate_quote(quote: InsuranceQuote) -> tuple[InsuranceQuote, list[str]]:
         warnings.append(f"Non-standard deductible: ${quote.deductible:,.0f}")
 
     # 4. Coverage limits — each value must be positive
-    for key, value in quote.coverage_limits.items():
+    for key, value in quote.coverage_limits.model_dump(exclude_none=True).items():
         if isinstance(value, (int, float)) and value <= 0:
             warnings.append(f"Coverage limit '{key}' is non-positive: {value}")
 

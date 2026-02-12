@@ -168,7 +168,7 @@ class SheetsClient:
         return str(value)
 
     def _get_auto_limits(self, quote: InsuranceQuote) -> str:
-        """Format auto liability limits from coverage_limits dict.
+        """Format auto liability limits from coverage_limits.
 
         Args:
             quote: Auto insurance quote
@@ -176,35 +176,27 @@ class SheetsClient:
         Returns:
             Formatted string like "500/500/250" or "1M CSL"
         """
-        limits = quote.coverage_limits
+        cl = quote.coverage_limits
 
         # Check for split limits (BI per person / BI per accident / PD)
-        bi_per_person = limits.get("bi_per_person")
-        bi_per_accident = limits.get("bi_per_accident")
-        pd_per_accident = limits.get("pd_per_accident")
-
-        if all([bi_per_person, bi_per_accident, pd_per_accident]):
-            # Convert to thousands notation
-            bi_p = int(bi_per_person / 1000) if isinstance(bi_per_person, (int, float)) else 0
-            bi_a = int(bi_per_accident / 1000) if isinstance(bi_per_accident, (int, float)) else 0
-            pd_a = int(pd_per_accident / 1000) if isinstance(pd_per_accident, (int, float)) else 0
+        if all([cl.bi_per_person, cl.bi_per_accident, cl.pd_per_accident]):
+            bi_p = int(cl.bi_per_person / 1000)
+            bi_a = int(cl.bi_per_accident / 1000)
+            pd_a = int(cl.pd_per_accident / 1000)
             return f"{bi_p}/{bi_a}/{pd_a}"
 
         # Check for CSL (Combined Single Limit)
-        csl = limits.get("csl") or limits.get("combined_single_limit")
-        if csl:
-            if isinstance(csl, (int, float)):
-                if csl >= 1_000_000:
-                    return f"{int(csl / 1_000_000)}M CSL"
-                else:
-                    return f"{int(csl / 1000)}K CSL"
-            return str(csl)
+        if cl.csl:
+            if cl.csl >= 1_000_000:
+                return f"{int(cl.csl / 1_000_000)}M CSL"
+            else:
+                return f"{int(cl.csl / 1000)}K CSL"
 
         # Fallback
         return "-"
 
     def _get_umbrella_limits(self, quote: InsuranceQuote) -> str | float:
-        """Format umbrella limits from coverage_limits dict.
+        """Format umbrella limits from coverage_limits.
 
         Args:
             quote: Umbrella insurance quote
@@ -212,20 +204,10 @@ class SheetsClient:
         Returns:
             Formatted string like "1M CSL" or raw number
         """
-        limits = quote.coverage_limits
-
-        # Common keys for umbrella limits
-        limit_value = (
-            limits.get("umbrella_limit") or
-            limits.get("liability_limit") or
-            limits.get("limit")
-        )
+        limit_value = quote.coverage_limits.umbrella_limit
 
         if not limit_value:
             return "-"
-
-        if isinstance(limit_value, str):
-            return limit_value
 
         # Format in millions for readability
         if isinstance(limit_value, (int, float)):
@@ -318,31 +300,31 @@ class SheetsClient:
             self._build_coverage_row(
                 session,
                 lambda cp: cp.home_dwelling,
-                lambda cb: cb.home.coverage_limits.get("dwelling") if cb.home else None
+                lambda cb: cb.home.coverage_limits.dwelling if cb.home else None
             ),
             # Row 11: Other Structures
             self._build_coverage_row(
                 session,
                 lambda cp: cp.home_other_structures,
-                lambda cb: cb.home.coverage_limits.get("other_structures") if cb.home else None
+                lambda cb: cb.home.coverage_limits.other_structures if cb.home else None
             ),
             # Row 12: Liability
             self._build_coverage_row(
                 session,
                 lambda cp: cp.home_liability,
-                lambda cb: cb.home.coverage_limits.get("personal_liability") if cb.home else None
+                lambda cb: cb.home.coverage_limits.personal_liability if cb.home else None
             ),
             # Row 13: Personal Property
             self._build_coverage_row(
                 session,
                 lambda cp: cp.home_personal_property,
-                lambda cb: cb.home.coverage_limits.get("personal_property") if cb.home else None
+                lambda cb: cb.home.coverage_limits.personal_property if cb.home else None
             ),
-            # Row 14: Loss of Use (may be text like "ALS")
+            # Row 14: Loss of Use
             self._build_coverage_row(
                 session,
                 lambda cp: cp.home_loss_of_use,
-                lambda cb: cb.home.coverage_limits.get("loss_of_use") if cb.home else None
+                lambda cb: cb.home.coverage_limits.loss_of_use if cb.home else None
             ),
             # Row 15: Deductible
             self._build_coverage_row(
@@ -368,13 +350,13 @@ class SheetsClient:
             self._build_coverage_row(
                 session,
                 lambda cp: cp.auto_um_uim,
-                lambda cb: cb.auto.coverage_limits.get("um_uim") if cb.auto else None
+                lambda cb: cb.auto.coverage_limits.um_uim if cb.auto else None
             ),
             # Row 20: Comprehensive Deductible
             self._build_coverage_row(
                 session,
                 lambda cp: cp.auto_comp_deductible,
-                lambda cb: cb.auto.coverage_limits.get("comprehensive") if cb.auto else None
+                lambda cb: cb.auto.coverage_limits.comprehensive if cb.auto else None
             ),
             # Row 21: Collision Deductible
             self._build_coverage_row(

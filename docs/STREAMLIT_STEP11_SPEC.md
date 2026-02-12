@@ -1,10 +1,3 @@
-# Phase 5: Streamlit UI — Step 11: Session State & Wizard Skeleton
-
-> Place in `docs/`. Reference from CLAUDE.md.
-> This is the navigation shell only — no extraction logic, no Sheets/PDF export. Just the page structure and state management.
-
----
-
 ## Overview
 
 Single-page Streamlit app with a wizard-style flow. Three stages expand sequentially — the agent completes each stage before the next unlocks. All state lives in `st.session_state`.

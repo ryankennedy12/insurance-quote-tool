@@ -2,6 +2,27 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 
+class CoverageLimits(BaseModel):
+    """Structured coverage limits for Gemini schema compatibility."""
+    # Home (HO3/HO5)
+    dwelling: Optional[float] = Field(None, description="Dwelling coverage (Coverage A)")
+    other_structures: Optional[float] = Field(None, description="Other Structures (Coverage B)")
+    personal_property: Optional[float] = Field(None, description="Personal Property (Coverage C)")
+    loss_of_use: Optional[float] = Field(None, description="Loss of Use / Additional Living Expense (Coverage D)")
+    personal_liability: Optional[float] = Field(None, description="Personal Liability (Coverage E)")
+    medical_payments: Optional[float] = Field(None, description="Medical Payments to Others (Coverage F)")
+    # Auto
+    bi_per_person: Optional[float] = Field(None, description="Bodily Injury per person")
+    bi_per_accident: Optional[float] = Field(None, description="Bodily Injury per accident")
+    pd_per_accident: Optional[float] = Field(None, description="Property Damage per accident")
+    um_uim: Optional[float] = Field(None, description="Uninsured/Underinsured Motorist")
+    comprehensive: Optional[float] = Field(None, description="Comprehensive deductible")
+    collision: Optional[float] = Field(None, description="Collision deductible")
+    csl: Optional[float] = Field(None, description="Combined Single Limit (auto)")
+    # Umbrella
+    umbrella_limit: Optional[float] = Field(None, description="Umbrella/excess liability limit")
+
+
 class InsuranceQuote(BaseModel):
     carrier_name: str = Field(description="Insurance carrier name (e.g., 'Erie Insurance', 'State Farm')")
     policy_type: str = Field(description="Policy type code: HO3, HO5, Auto, BOP, etc.")
@@ -11,17 +32,7 @@ class InsuranceQuote(BaseModel):
     monthly_premium: Optional[float] = Field(None, description="Monthly premium if quoted separately")
     deductible: float = Field(description="Primary deductible in USD")
     wind_hail_deductible: Optional[float] = Field(None, description="Separate wind/hail deductible if applicable")
-    coverage_limits: dict[str, float | str] = Field(
-        description="Coverage type to limit amount mapping",
-        examples=[{
-            "dwelling": 300000,
-            "other_structures": 30000,
-            "personal_property": 150000,
-            "loss_of_use": 60000,
-            "personal_liability": 100000,
-            "medical_payments": 5000
-        }]
-    )
+    coverage_limits: CoverageLimits = Field(default_factory=CoverageLimits, description="Coverage limits by type")
     endorsements: list[str] = Field(default_factory=list, description="List of endorsements/riders included")
     exclusions: list[str] = Field(default_factory=list, description="List of notable exclusions")
     discounts_applied: list[str] = Field(default_factory=list, description="Discounts applied to this quote")

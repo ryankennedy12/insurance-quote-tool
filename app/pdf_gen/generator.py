@@ -637,8 +637,8 @@ class SciotoComparisonPDF(FPDF):
                 val = getattr(carrier.home, carrier_key, None)
                 values.append(self._fmt_currency(val) if val else "-")
             else:
-                # coverage_limits dict
-                val = carrier.home.coverage_limits.get(carrier_key)
+                # coverage_limits model field
+                val = getattr(carrier.home.coverage_limits, carrier_key, None)
                 if val is None:
                     values.append("-")
                 elif isinstance(val, str):
@@ -679,8 +679,8 @@ class SciotoComparisonPDF(FPDF):
                 # Direct deductible attribute
                 values.append(self._fmt_currency(carrier.auto.deductible))
             else:
-                # coverage_limits dict (um_uim, comprehensive)
-                val = carrier.auto.coverage_limits.get(carrier_key)
+                # coverage_limits model field (um_uim, comprehensive)
+                val = getattr(carrier.auto.coverage_limits, carrier_key, None)
                 if val is None:
                     values.append("-")
                 elif isinstance(val, str):
@@ -728,39 +728,24 @@ class SciotoComparisonPDF(FPDF):
         cl = quote.coverage_limits
 
         # Split limits: BI/BI/PD format
-        bi_person = cl.get("bi_per_person")
-        bi_accident = cl.get("bi_per_accident")
-        pd = cl.get("pd_per_accident")
-
-        if bi_person and bi_accident and pd:
-            # Convert to thousands (e.g., 500000 → 500)
-            return f"{int(bi_person/1000)}/{int(bi_accident/1000)}/{int(pd/1000)}"
+        if cl.bi_per_person and cl.bi_per_accident and cl.pd_per_accident:
+            return f"{int(cl.bi_per_person/1000)}/{int(cl.bi_per_accident/1000)}/{int(cl.pd_per_accident/1000)}"
 
         # CSL (Combined Single Limit)
-        csl = cl.get("csl") or cl.get("combined_single_limit")
-        if csl:
-            if isinstance(csl, str):
-                return csl
-            # Format as XM CSL or XK CSL
-            if csl >= 1_000_000:
-                return f"{int(csl/1_000_000)}M CSL"
+        if cl.csl:
+            if cl.csl >= 1_000_000:
+                return f"{int(cl.csl/1_000_000)}M CSL"
             else:
-                return f"{int(csl/1000)}K CSL"
+                return f"{int(cl.csl/1000)}K CSL"
 
         return "-"
 
     def _get_umbrella_limits(self, quote: InsuranceQuote) -> str:
         """Format umbrella limits into display string."""
-        cl = quote.coverage_limits
-
-        # Try multiple key names
-        limit = cl.get("umbrella_limit") or cl.get("liability_limit") or cl.get("limit")
+        limit = quote.coverage_limits.umbrella_limit
 
         if limit is None:
             return "-"
-
-        if isinstance(limit, str):
-            return limit
 
         # Format numeric values >= 1M as "XM CSL"
         if limit >= 1_000_000:

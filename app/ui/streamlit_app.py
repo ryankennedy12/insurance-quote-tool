@@ -106,23 +106,16 @@ def _build_current_policy_from_form() -> CurrentPolicy:
 
 def _build_current_policy_from_quote(quote: InsuranceQuote) -> CurrentPolicy:
     """Convert InsuranceQuote to CurrentPolicy (home fields only per spec)."""
-    cov = quote.coverage_limits
-
-    # Helper to extract float or None from coverage_limits dict
-    def get_float(key: str) -> Optional[float]:
-        val = cov.get(key)
-        if isinstance(val, (int, float)):
-            return float(val)
-        return None
+    cl = quote.coverage_limits
 
     return CurrentPolicy(
         carrier_name=quote.carrier_name,
         home_premium=quote.annual_premium,
-        home_dwelling=get_float("dwelling"),
-        home_other_structures=get_float("other_structures"),
-        home_personal_property=get_float("personal_property"),
-        home_liability=get_float("liability"),
-        home_loss_of_use=get_float("loss_of_use"),
+        home_dwelling=cl.dwelling,
+        home_other_structures=cl.other_structures,
+        home_personal_property=cl.personal_property,
+        home_liability=cl.personal_liability,
+        home_loss_of_use=cl.loss_of_use,
         home_deductible=quote.deductible if quote.deductible else None,
         # Auto and umbrella fields left as None (user fills in Review stage)
     )

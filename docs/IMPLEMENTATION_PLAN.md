@@ -682,60 +682,36 @@ Create a desktop shortcut pointing to `run.bat`.
 
 ---
 
-### 2026-02-11 — Phase 5, Step 12: Upload Stage with Real Logic (WIP)
+### 2026-02-11 — Phase 5, Step 12: Upload Stage + Extraction Pipeline Fixes
 
-**Status:** IN PROGRESS (temp file fix pending)
+**Status:** COMPLETE
 
 **Modified files:**
-- `app/ui/streamlit_app.py` (+486 lines, 209→695 lines total)
-- `app/extraction/ai_extractor.py` (Windows file locking fix)
+- `app/ui/streamlit_app.py` — Upload stage UI with real extraction logic
+- `app/extraction/models.py` — `CoverageLimits` sub-model replacing `dict[str, float | str]`
+- `app/extraction/ai_extractor.py` — Gemini schema fixes, mkstemp temp files, dict-to-Pydantic conversion
+- `app/extraction/pdf_parser.py` — Eliminated temp files (in-memory PDF open)
+- `app/extraction/validator.py` — Adapted to CoverageLimits model
+- `app/sheets/sheets_client.py` — Dict `.get()` changed to dot notation
+- `app/pdf_gen/generator.py` — Dict `.get()` changed to dot notation / `getattr()`
+- `tests/test_pdf_visual.py` — Test data updated for CoverageLimits fields
 
-**Completed:**
-- **7 helper functions added:**
-  - `_build_current_policy_from_form()` — Builds CurrentPolicy from form state (cp_* keys), converts 0.0→None
-  - `_build_current_policy_from_quote()` — Maps InsuranceQuote→CurrentPolicy (home fields only per spec)
-  - `_validate_upload_stage()` — Pre-extraction validation (client name, sections, carriers, PDFs, duplicates)
-  - `_add_carrier_callback()` — Adds carrier slot (max 6) via on_click callback
-  - `_remove_carrier_callback(index)` — Removes carrier slot (min 2) via on_click callback
-  - `_render_current_policy_manual_form()` — Section-adaptive form (🏠 7 fields, 🚗 5 fields, ☂️ 3 fields)
-  - `_render_current_policy_upload()` — File uploader + Extract button for current policy PDF
+**Upload Stage UI:**
+- 7 helpers: `_build_current_policy_from_form/quote()`, `_validate_upload_stage()`, `_add/remove_carrier_callback()`, `_render_current_policy_manual_form/upload()`
+- Current Policy: Skip / Enter Manually / Upload Dec Page PDF
+- Dynamic Carrier Upload: 2-6 carriers, section-responsive file uploaders
+- Extract All: validation, progress bar, non-blocking failures, auto-rerun
 
-- **Current Policy Entry (3 modes):**
-  - Skip: No action
-  - Enter Manually: Expandable form with two-column layout, dynamic fields based on sections_included
-  - Upload Dec Page PDF: File uploader + extraction button, maps to home fields only, shows info note
+**Bug Fix — Windows temp file locking (WinError 32):**
+- `pdf_parser.py`: Eliminated temp files. Uses `fitz.open(stream=pdf_bytes, filetype="pdf")` + `pymupdf4llm.to_markdown(doc)` in memory.
+- `ai_extractor.py _call_gemini_multimodal()`: `tempfile.mkstemp()` with `os.write()` + `os.close()` before `client.files.upload()`, cleanup in `finally`.
 
-- **Dynamic Carrier Upload:**
-  - 2-6 carriers with bordered containers
-  - Name text input + remove button (on_click callback) per carrier
-  - File uploaders responsive to sections_included (columns)
-  - Add Another Carrier button (disabled at 6)
+**Bug Fix — Gemini structured output schema compatibility:**
+- `CoverageLimits(BaseModel)`: 14 explicit `Optional[float]` fields (6 home, 7 auto incl. `csl`, 1 umbrella). Replaces `dict[str, float | str]` which Gemini cannot enforce.
+- `_clean_schema_for_gemini()`: Recursively strips `additionalProperties`, `examples`, `title`, `default` from Pydantic JSON schema before passing to Gemini config.
+- Dict-to-Pydantic conversion: `response.parsed` returns `dict` when using dict schema. Both Gemini call functions check `isinstance(response.parsed, dict)` and convert via `InsuranceQuote.model_validate()`.
+- All downstream code updated from `.get("key")` to dot notation or `getattr()`.
 
-- **Extract All Button:**
-  - Validation with detailed error messages
-  - Progress bar (fraction complete) + status widget (detailed log)
-  - Non-blocking failures (collected as warnings)
-  - Success summary + warnings expander
-  - Auto-rerun to Step 2 after completion
-  - Resets Steps 2 and 3 state on re-extraction
+**Verified:** Erie and Progressive home quotes extracted successfully through Streamlit UI on Windows.
 
-**Pending:**
-- **Windows file locking fix in ai_extractor.py:**
-  - Changed from `NamedTemporaryFile` to `tempfile.mkstemp()` pattern
-  - Uses raw file descriptor (`os.write()`, `os.close()`) before `client.files.upload()`
-  - Pattern: create temp file → write bytes → close fd → upload → cleanup in finally block
-  - **Testing required:** Need to verify extraction works on Windows with real PDFs
-
-**Implementation details:**
-- All carrier mutations use on_click callbacks (not deferred removal)
-- 0.0 number_input defaults converted to None (not real values)
-- Loss of Use field: text_input supports "ALS", parses to float if numeric, stores None otherwise
-- Duplicate carrier name validation
-- Form uses session_state keys: cp_carrier_name, cp_home_premium, etc.
-- Carriers stored as list of dicts: {name, home_pdf, auto_pdf, umbrella_pdf}
-
-**Next steps:**
-1. Test extraction with real PDFs on Windows
-2. Verify mkstemp file locking fix resolves WinError 32
-3. Manual testing checklist (16 scenarios from plan)
-4. Move to Step 13: Review Stage (editable data tables)
+**Next:** Step 13 (Review Stage) per `docs/STREAMLIT_STEP13_SPEC.md`
