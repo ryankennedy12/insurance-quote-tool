@@ -117,3 +117,4 @@ class ComparisonSession(BaseModel):
         default_factory=list,
         description="Which sections are active: 'home', 'auto', 'umbrella'"
     )
+    agent_notes: Optional[str] = Field(None, description="General agent notes for PDF export")

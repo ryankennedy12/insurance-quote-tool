@@ -1,0 +1,1118 @@
+## Claude Code Plan ##
+Phase 4: PDF Generation Implementation Plan
+Context
+The existing PDF generator (docs/EXISTING_PDF_CODE.py) was built for single-policy comparisons with simple dict-based data. The agency workflow now requires multi-policy bundled comparisons (Home + Auto + Umbrella per carrier) with Current Policy baseline comparison. This implementation updates the PDF generator to match the new data models (ComparisonSession, CarrierBundle, CurrentPolicy) and the agency's actual template layout.
+
+Key changes: Remove "best value" green highlighting, add Current Policy column with blue-gray styling, restructure to multi-section layout (Premium Summary at top → Home Details → Auto Details → Umbrella Details), update branding to maroon #871c30, and add two-part notes section.
+
+Critical Files
+Target: app/pdf_gen/generator.py (new file, adapted from docs/EXISTING_PDF_CODE.py)
+Models: app/extraction/models.py (lines 5-119) - ComparisonSession, CarrierBundle, CurrentPolicy, InsuranceQuote
+NOTE: Must add agent_notes: Optional[str] = None field to ComparisonSession (after line 119)
+Reusable utilities: app/sheets/sheets_client.py (lines 151-237) - _format_cell_value(), _get_auto_limits(), _get_umbrella_limits()
+Updated Constants
+BRAND Dictionary (lines 21-36 in existing code)
+Changes:
+
+Update "primary" from (127, 27, 36) → (135, 28, 48) (maroon #871c30)
+Remove: "best_value_bg": (230, 245, 230) and "best_value_border": (76, 175, 80)
+Add: "current_bg": (230, 240, 248) (light blue-gray for Current Policy column)
+Add: "current_header": (180, 200, 220) (darker blue-gray for Current header)
+Final BRAND dict:
+
+
+BRAND = {
+    "primary":       (135, 28, 48),    # #871c30 maroon
+    "primary_dark":  (95, 18, 25),
+    "primary_light": (178, 60, 72),
+    "cream":         (248, 240, 232),
+    "white":         (255, 255, 255),
+    "text_dark":     (40, 40, 40),
+    "text_medium":   (100, 100, 100),
+    "text_light":    (160, 160, 160),
+    "row_alt":       (252, 248, 248),
+    "row_white":     (255, 255, 255),
+    "current_bg":    (230, 240, 248),   # NEW
+    "current_header":(180, 200, 220),   # NEW
+    "border_light":  (220, 215, 215),
+    "divider":       (200, 190, 190),
+}
+Updated LAYOUT_CONFIG
+Problem: Current Policy Column Shifts Portrait→Landscape Threshold
+Old logic (lines 41-47):
+
+2-4 carriers → Portrait
+5-6 carriers → Landscape
+New logic: Must account for Current Policy column as an additional data column.
+
+Total data columns = num_carriers + (1 if has_current else 0)
+
+Updated thresholds:
+
+Portrait: up to 5 total data columns (e.g., 4 carriers + current, OR 5 carriers no current)
+Landscape: 6+ total data columns (e.g., 5 carriers + current, OR 6 carriers no current)
+Updated _get_layout Function (replaces lines 50-53)
+Before:
+
+
+def _get_layout(num_carriers: int) -> dict:
+    """Return layout config clamped to 2–6 range."""
+    n = max(2, min(6, num_carriers))
+    return LAYOUT_CONFIG[n]
+After:
+
+
+def _get_layout(num_carriers: int, has_current: bool) -> dict:
+    """Return layout config based on total data columns."""
+    total_data_cols = num_carriers + (1 if has_current else 0)
+
+    # Portrait: 2-5 data columns, Landscape: 6-7 data columns
+    if total_data_cols <= 3:
+        return {"orientation": "P", "label_w": 52, "header_font": 8, "body_font": 8, "row_h": 8}
+    elif total_data_cols == 4:
+        return {"orientation": "P", "label_w": 50, "header_font": 7.5, "body_font": 7.5, "row_h": 8}
+    elif total_data_cols == 5:
+        return {"orientation": "P", "label_w": 48, "header_font": 7.5, "body_font": 7.5, "row_h": 8}
+    elif total_data_cols == 6:
+        return {"orientation": "L", "label_w": 50, "header_font": 7.5, "body_font": 7, "row_h": 7.5}
+    else:  # 7 data columns (6 carriers + current)
+        return {"orientation": "L", "label_w": 46, "header_font": 7, "body_font": 6.5, "row_h": 7}
+LAYOUT_CONFIG dict (lines 41-47) can be removed — replaced by inline logic above.
+
+Method-by-Method Changes
+1. __init__ (lines 59-73)
+Changes:
+
+Remove: self.agency_license = "OH License #1234567" (line 72)
+Keep: Everything else unchanged
+2. _register_fonts (lines 74-83)
+Status: ✅ PRESERVE EXACTLY — No changes
+
+3. _space_remaining and _ensure_space (lines 90-97)
+Status: ✅ PRESERVE EXACTLY — No changes
+
+4. header (lines 102-106)
+Status: ✅ PRESERVE EXACTLY — No changes
+
+5. _draw_branded_header (lines 108-142)
+Status: ✅ PRESERVE EXACTLY — No changes
+
+6. _draw_continuation_header (lines 144-159)
+Status: ✅ PRESERVE EXACTLY — No changes
+
+7. footer (lines 161-184)
+Changes:
+
+Remove line 173: self.cell(0, 4, self.agency_license, align="L")
+Keep: Page number (centered) and disclaimer text (lines 174-183)
+After modification (simplified):
+
+
+def footer(self):
+    """Branded footer with page number + disclaimer."""
+    self.set_y(-20)
+
+    # Thin divider
+    self.set_draw_color(*BRAND["divider"])
+    self.set_line_width(0.3)
+    self.line(15, self.get_y(), self.w - 15, self.get_y())
+
+    self.ln(2)
+    self.set_font(self.font_family_name, "I", 7)
+    self.set_text_color(*BRAND["text_medium"])
+    # Centered page number
+    self.cell(0, 4, f"Page {self.page_no()}/{{nb}}", align="C")
+
+    self.ln(4)
+    self.set_font(self.font_family_name, "", 5.5)
+    self.multi_cell(0, 3, "This comparison is for informational purposes only...", align="C")
+8. add_client_section (lines 189-220)
+Status: ✅ PRESERVE EXACTLY — No changes
+
+9. add_section_title (lines 222-240)
+Status: ✅ PRESERVE EXACTLY — No changes
+
+10. add_comparison_table (lines 242-408)
+Status: ❌ COMPLETE REWRITE — Old flat layout → New multi-section layout
+
+Remove:
+
+best_idx calculation (line 264-265)
+Green highlighting logic (lines 282-286, 380-389)
+★ star prefix (line 389)
+Old section order (Coverage Limits → Deductibles → Premium)
+New structure:
+
+
+def add_comparison_table(
+    self,
+    session: ComparisonSession,
+    layout: dict
+):
+    """Build multi-section comparison table: Premium Summary → Home → Auto → Umbrella."""
+
+    # Setup: calculate column widths
+    num_carriers = len(session.carriers)
+    has_current = session.current_policy is not None
+    page_w = self.w
+    margin = 15
+    usable_w = page_w - 2 * margin
+    label_col_w = layout["label_w"]
+
+    # Data columns = current (0 or 1) + carriers (2-6)
+    num_data_cols = num_carriers + (1 if has_current else 0)
+    data_col_w = (usable_w - label_col_w) / num_data_cols
+
+    # Extract font sizes from layout
+    hf = layout["header_font"]
+    bf = layout["body_font"]
+    row_h = layout["row_h"]
+    x_start = margin
+
+    # ── TABLE HEADER ROW ──
+    self._add_table_header(
+        x_start, label_col_w, data_col_w, hf,
+        session.current_policy, session.carriers
+    )
+
+    # ── SECTION 1: PREMIUM SUMMARY (always shown) ──
+    self._add_premium_section(
+        x_start, label_col_w, data_col_w, bf, row_h,
+        session.current_policy, session.carriers, session.sections_included
+    )
+
+    # ── SECTION 2: HOME DETAILS ──
+    if "home" in session.sections_included:
+        self._add_home_section(
+            x_start, label_col_w, data_col_w, bf, row_h,
+            session.current_policy, session.carriers
+        )
+
+    # ── SECTION 3: AUTO DETAILS ──
+    if "auto" in session.sections_included:
+        self._add_auto_section(
+            x_start, label_col_w, data_col_w, bf, row_h,
+            session.current_policy, session.carriers
+        )
+
+    # ── SECTION 4: UMBRELLA DETAILS ──
+    if "umbrella" in session.sections_included:
+        self._add_umbrella_section(
+            x_start, label_col_w, data_col_w, bf, row_h,
+            session.current_policy, session.carriers
+        )
+11. NEW HELPER METHODS (Add after add_comparison_table)
+_add_table_header
+
+def _add_table_header(
+    self,
+    x_start: float,
+    label_col_w: float,
+    data_col_w: float,
+    header_font: float,
+    current_policy: Optional[CurrentPolicy],
+    carriers: list[CarrierBundle]
+):
+    """Render table header row: Label | Current | Carrier 1 | ... | Carrier N."""
+    self._ensure_space(12)
+    y = self.get_y()
+
+    # Label column header
+    self.set_fill_color(*BRAND["primary"])
+    self.set_text_color(*BRAND["white"])
+    self.set_font(self.font_family_name, "B", header_font)
+    self.set_xy(x_start, y)
+    self.cell(label_col_w, 10, "  COVERAGE", border=1, fill=True, align="L")
+
+    col_idx = 0
+
+    # Current Policy column (if exists)
+    if current_policy:
+        x = x_start + label_col_w + col_idx * data_col_w
+        self.set_xy(x, y)
+        self.set_fill_color(*BRAND["current_header"])
+        self.set_text_color(*BRAND["white"])
+        self.cell(data_col_w, 10, current_policy.carrier_name, border=1, fill=True, align="C")
+        col_idx += 1
+
+    # Carrier columns
+    for carrier in carriers:
+        x = x_start + label_col_w + col_idx * data_col_w
+        self.set_xy(x, y)
+        self.set_fill_color(*BRAND["primary"])
+        self.set_text_color(*BRAND["white"])
+        name = carrier.carrier_name
+        if data_col_w < 35 and len(name) > 14:
+            name = name[:13] + "…"
+        self.cell(data_col_w, 10, name, border=1, fill=True, align="C")
+        col_idx += 1
+
+    self.ln(10)
+_add_premium_section
+
+def _add_premium_section(
+    self,
+    x_start: float,
+    label_col_w: float,
+    data_col_w: float,
+    body_font: float,
+    row_h: float,
+    current_policy: Optional[CurrentPolicy],
+    carriers: list[CarrierBundle],
+    sections_included: list[str]
+):
+    """Premium Summary section: Home, Auto, Umbrella, Total."""
+    self._add_section_divider_row(
+        "PREMIUM SUMMARY", label_col_w, data_col_w, x_start, body_font,
+        current_policy, carriers
+    )
+
+    row_idx = 0
+
+    # Home Premium (if included)
+    if "home" in sections_included:
+        self._add_data_row(
+            label="Home Premium",
+            values=self._extract_premium_row("home", current_policy, carriers),
+            row_idx=row_idx,
+            label_col_w=label_col_w,
+            data_col_w=data_col_w,
+            x_start=x_start,
+            font_size=body_font,
+            row_h=row_h,
+            current_policy=current_policy
+        )
+        row_idx += 1
+
+    # Auto Premium (if included)
+    if "auto" in sections_included:
+        self._add_data_row(
+            label="Auto Premium",
+            values=self._extract_premium_row("auto", current_policy, carriers),
+            row_idx=row_idx,
+            label_col_w=label_col_w,
+            data_col_w=data_col_w,
+            x_start=x_start,
+            font_size=body_font,
+            row_h=row_h,
+            current_policy=current_policy
+        )
+        row_idx += 1
+
+    # Umbrella Premium (if included)
+    if "umbrella" in sections_included:
+        self._add_data_row(
+            label="Umbrella Premium",
+            values=self._extract_premium_row("umbrella", current_policy, carriers),
+            row_idx=row_idx,
+            label_col_w=label_col_w,
+            data_col_w=data_col_w,
+            x_start=x_start,
+            font_size=body_font,
+            row_h=row_h,
+            current_policy=current_policy
+        )
+        row_idx += 1
+
+    # Total (bold, highlighted)
+    self._add_total_row(
+        x_start, label_col_w, data_col_w, body_font, row_h,
+        current_policy, carriers
+    )
+_add_home_section
+
+def _add_home_section(
+    self,
+    x_start: float,
+    label_col_w: float,
+    data_col_w: float,
+    body_font: float,
+    row_h: float,
+    current_policy: Optional[CurrentPolicy],
+    carriers: list[CarrierBundle]
+):
+    """Home Details section: Dwelling, Other Structures, etc."""
+    self.ln(3)  # Small gap between sections
+    self._add_section_divider_row(
+        "HOME DETAILS", label_col_w, data_col_w, x_start, body_font,
+        current_policy, carriers
+    )
+
+    home_rows = [
+        ("Dwelling (Cov A)", "dwelling", "home_dwelling"),
+        ("Other Structures (B)", "other_structures", "home_other_structures"),
+        ("Personal Property (C)", "personal_property", "home_personal_property"),
+        ("Loss of Use (D)", "loss_of_use", "home_loss_of_use"),
+        ("Personal Liability (E)", "personal_liability", "home_liability"),
+        ("Medical Payments (F)", "medical_payments", None),  # Not on CurrentPolicy
+        ("All-Peril Deductible", "deductible", "home_deductible"),
+        ("Wind/Hail Deductible", "wind_hail_deductible", None),
+    ]
+
+    for row_idx, (label, carrier_key, current_key) in enumerate(home_rows):
+        values = self._extract_home_row(carrier_key, current_key, current_policy, carriers)
+        self._add_data_row(
+            label=label,
+            values=values,
+            row_idx=row_idx,
+            label_col_w=label_col_w,
+            data_col_w=data_col_w,
+            x_start=x_start,
+            font_size=body_font,
+            row_h=row_h,
+            current_policy=current_policy
+        )
+_add_auto_section
+
+def _add_auto_section(
+    self,
+    x_start: float,
+    label_col_w: float,
+    data_col_w: float,
+    body_font: float,
+    row_h: float,
+    current_policy: Optional[CurrentPolicy],
+    carriers: list[CarrierBundle]
+):
+    """Auto Details section: Limits, UM/UIM, Deductibles."""
+    self.ln(3)
+    self._add_section_divider_row(
+        "AUTO DETAILS", label_col_w, data_col_w, x_start, body_font,
+        current_policy, carriers
+    )
+
+    auto_rows = [
+        ("Limits", "limits", "auto_limits"),
+        ("UM/UIM", "um_uim", "auto_um_uim"),
+        ("Deductibles (Comp)", "comprehensive", "auto_comp_deductible"),
+        ("Deductibles (Collision)", "collision", "auto_collision_deductible"),
+    ]
+
+    for row_idx, (label, carrier_key, current_key) in enumerate(auto_rows):
+        values = self._extract_auto_row(carrier_key, current_key, current_policy, carriers)
+        self._add_data_row(
+            label=label,
+            values=values,
+            row_idx=row_idx,
+            label_col_w=label_col_w,
+            data_col_w=data_col_w,
+            x_start=x_start,
+            font_size=body_font,
+            row_h=row_h,
+            current_policy=current_policy
+        )
+_add_umbrella_section
+
+def _add_umbrella_section(
+    self,
+    x_start: float,
+    label_col_w: float,
+    data_col_w: float,
+    body_font: float,
+    row_h: float,
+    current_policy: Optional[CurrentPolicy],
+    carriers: list[CarrierBundle]
+):
+    """Umbrella Details section: Limits, Deductible."""
+    self.ln(3)
+    self._add_section_divider_row(
+        "UMBRELLA DETAILS", label_col_w, data_col_w, x_start, body_font,
+        current_policy, carriers
+    )
+
+    umbrella_rows = [
+        ("Limits", "limits", "umbrella_limits"),
+        ("Deductible", "deductible", "umbrella_deductible"),
+    ]
+
+    for row_idx, (label, carrier_key, current_key) in enumerate(umbrella_rows):
+        values = self._extract_umbrella_row(carrier_key, current_key, current_policy, carriers)
+        self._add_data_row(
+            label=label,
+            values=values,
+            row_idx=row_idx,
+            label_col_w=label_col_w,
+            data_col_w=data_col_w,
+            x_start=x_start,
+            font_size=body_font,
+            row_h=row_h,
+            current_policy=current_policy
+        )
+_add_total_row
+
+def _add_total_row(
+    self,
+    x_start: float,
+    label_col_w: float,
+    data_col_w: float,
+    body_font: float,
+    row_h: float,
+    current_policy: Optional[CurrentPolicy],
+    carriers: list[CarrierBundle]
+):
+    """Total Premium row (bold, cream background, no green highlighting)."""
+    self._ensure_space(row_h + 3)
+    y = self.get_y()
+
+    # Label cell
+    self.set_fill_color(*BRAND["cream"])
+    self.set_text_color(*BRAND["primary_dark"])
+    self.set_font(self.font_family_name, "B", body_font + 1)
+    self.set_xy(x_start, y)
+    self.cell(label_col_w, row_h + 2, "  Total", border=1, fill=True, align="L")
+
+    col_idx = 0
+
+    # Current Policy total
+    if current_policy:
+        x = x_start + label_col_w + col_idx * data_col_w
+        self.set_xy(x, y)
+        self.set_fill_color(*BRAND["current_bg"])
+        self.set_text_color(*BRAND["primary_dark"])
+        total_str = self._fmt_currency(current_policy.total_premium)
+        self.cell(data_col_w, row_h + 2, total_str, border=1, fill=True, align="C")
+        col_idx += 1
+
+    # Carrier totals
+    for carrier in carriers:
+        x = x_start + label_col_w + col_idx * data_col_w
+        self.set_xy(x, y)
+        self.set_fill_color(*BRAND["cream"])
+        self.set_text_color(*BRAND["primary_dark"])
+        total_str = self._fmt_currency(carrier.total_premium)
+        self.cell(data_col_w, row_h + 2, total_str, border=1, fill=True, align="C")
+        col_idx += 1
+
+    self.ln(row_h + 2)
+12. NEW DATA EXTRACTION HELPERS
+_extract_premium_row
+
+def _extract_premium_row(
+    self,
+    policy_type: str,  # "home", "auto", or "umbrella"
+    current_policy: Optional[CurrentPolicy],
+    carriers: list[CarrierBundle]
+) -> list[str]:
+    """Extract premium values for a given policy type."""
+    values = []
+
+    # Current Policy value
+    if current_policy:
+        if policy_type == "home":
+            values.append(self._fmt_currency(current_policy.home_premium))
+        elif policy_type == "auto":
+            values.append(self._fmt_currency(current_policy.auto_premium))
+        elif policy_type == "umbrella":
+            values.append(self._fmt_currency(current_policy.umbrella_premium))
+
+    # Carrier values
+    for carrier in carriers:
+        if policy_type == "home" and carrier.home:
+            values.append(self._fmt_currency(carrier.home.annual_premium))
+        elif policy_type == "auto" and carrier.auto:
+            values.append(self._fmt_currency(carrier.auto.annual_premium))
+        elif policy_type == "umbrella" and carrier.umbrella:
+            values.append(self._fmt_currency(carrier.umbrella.annual_premium))
+        else:
+            values.append("-")
+
+    return values
+_extract_home_row
+
+def _extract_home_row(
+    self,
+    carrier_key: str,  # e.g., "dwelling", "deductible"
+    current_key: Optional[str],  # e.g., "home_dwelling", "home_deductible"
+    current_policy: Optional[CurrentPolicy],
+    carriers: list[CarrierBundle]
+) -> list[str]:
+    """Extract home coverage row values."""
+    values = []
+
+    # Current Policy value
+    if current_policy and current_key:
+        current_val = getattr(current_policy, current_key, None)
+        values.append(self._fmt_currency(current_val))
+    elif current_policy:
+        values.append("-")  # Field doesn't exist on CurrentPolicy
+
+    # Carrier values
+    for carrier in carriers:
+        if not carrier.home:
+            values.append("-")
+        elif carrier_key in ["deductible", "wind_hail_deductible"]:
+            # Direct attributes on InsuranceQuote
+            val = getattr(carrier.home, carrier_key, None)
+            values.append(self._fmt_currency(val) if val else "-")
+        else:
+            # coverage_limits dict
+            val = carrier.home.coverage_limits.get(carrier_key)
+            if val is None:
+                values.append("-")
+            elif isinstance(val, str):
+                values.append(val)  # Pass through text like "ALS"
+            else:
+                values.append(self._fmt_currency(val))
+
+    return values
+_extract_auto_row
+
+def _extract_auto_row(
+    self,
+    carrier_key: str,  # "limits", "um_uim", "comprehensive", "collision"
+    current_key: str,  # "auto_limits", "auto_um_uim", etc.
+    current_policy: Optional[CurrentPolicy],
+    carriers: list[CarrierBundle]
+) -> list[str]:
+    """Extract auto coverage row values."""
+    values = []
+
+    # Current Policy value
+    if current_policy:
+        current_val = getattr(current_policy, current_key, None)
+        if current_val is None:
+            values.append("-")
+        elif isinstance(current_val, str):
+            values.append(current_val)
+        else:
+            values.append(self._fmt_currency(current_val))
+
+    # Carrier values
+    for carrier in carriers:
+        if not carrier.auto:
+            values.append("-")
+        elif carrier_key == "limits":
+            # Use helper from sheets_client pattern
+            values.append(self._get_auto_limits(carrier.auto))
+        elif carrier_key == "collision":
+            # Direct deductible attribute
+            values.append(self._fmt_currency(carrier.auto.deductible))
+        else:
+            # coverage_limits dict (um_uim, comprehensive)
+            val = carrier.auto.coverage_limits.get(carrier_key)
+            if val is None:
+                values.append("-")
+            elif isinstance(val, str):
+                values.append(val)
+            else:
+                values.append(self._fmt_currency(val))
+
+    return values
+_extract_umbrella_row
+
+def _extract_umbrella_row(
+    self,
+    carrier_key: str,  # "limits" or "deductible"
+    current_key: str,  # "umbrella_limits" or "umbrella_deductible"
+    current_policy: Optional[CurrentPolicy],
+    carriers: list[CarrierBundle]
+) -> list[str]:
+    """Extract umbrella coverage row values."""
+    values = []
+
+    # Current Policy value
+    if current_policy:
+        current_val = getattr(current_policy, current_key, None)
+        if current_val is None:
+            values.append("-")
+        elif isinstance(current_val, str):
+            values.append(current_val)
+        else:
+            values.append(self._fmt_currency(current_val))
+
+    # Carrier values
+    for carrier in carriers:
+        if not carrier.umbrella:
+            values.append("-")
+        elif carrier_key == "limits":
+            # Use helper from sheets_client pattern
+            values.append(self._get_umbrella_limits(carrier.umbrella))
+        else:  # deductible
+            val = carrier.umbrella.deductible
+            values.append(self._fmt_currency(val) if val else "-")
+
+    return values
+_get_auto_limits (adapt from sheets_client.py)
+
+def _get_auto_limits(self, quote: InsuranceQuote) -> str:
+    """Format auto liability limits into display string."""
+    cl = quote.coverage_limits
+
+    # Split limits: BI/BI/PD format
+    bi_person = cl.get("bi_per_person")
+    bi_accident = cl.get("bi_per_accident")
+    pd = cl.get("pd_per_accident")
+
+    if bi_person and bi_accident and pd:
+        # Convert to thousands (e.g., 500000 → 500)
+        return f"{int(bi_person/1000)}/{int(bi_accident/1000)}/{int(pd/1000)}"
+
+    # CSL (Combined Single Limit)
+    csl = cl.get("csl") or cl.get("combined_single_limit")
+    if csl:
+        if isinstance(csl, str):
+            return csl
+        # Format as XM CSL or XK CSL
+        if csl >= 1_000_000:
+            return f"{int(csl/1_000_000)}M CSL"
+        else:
+            return f"{int(csl/1000)}K CSL"
+
+    return "-"
+_get_umbrella_limits (adapt from sheets_client.py)
+
+def _get_umbrella_limits(self, quote: InsuranceQuote) -> str:
+    """Format umbrella limits into display string."""
+    cl = quote.coverage_limits
+
+    # Try multiple key names
+    limit = cl.get("umbrella_limit") or cl.get("liability_limit") or cl.get("limit")
+
+    if limit is None:
+        return "-"
+
+    if isinstance(limit, str):
+        return limit
+
+    # Format numeric values >= 1M as "XM CSL"
+    if limit >= 1_000_000:
+        return f"{int(limit/1_000_000)}M CSL"
+
+    # Smaller values return as currency
+    return self._fmt_currency(limit)
+13. _add_section_divider_row (lines 471-481)
+Changes: Update signature to accept current_policy and carriers for column count calculation.
+
+Before:
+
+
+def _add_section_divider_row(self, title, num_carriers, label_w, carrier_w, x_start, font_size):
+    total_w = label_w + num_carriers * carrier_w
+    # ...
+After:
+
+
+def _add_section_divider_row(
+    self,
+    title: str,
+    label_w: float,
+    data_col_w: float,
+    x_start: float,
+    font_size: float,
+    current_policy: Optional[CurrentPolicy],
+    carriers: list[CarrierBundle]
+):
+    """Dark mini-header to separate table sections."""
+    self._ensure_space(8)
+    y = self.get_y()
+
+    num_data_cols = len(carriers) + (1 if current_policy else 0)
+    total_w = label_w + num_data_cols * data_col_w
+
+    self.set_fill_color(*BRAND["primary_dark"])
+    self.set_text_color(*BRAND["white"])
+    self.set_font(self.font_family_name, "B", font_size - 1)
+    self.set_xy(x_start, y)
+    self.cell(total_w, 6, f"  {title}", border=1, fill=True, align="L")
+    self.ln(6)
+14. _add_data_row (lines 483-511)
+Changes:
+
+Remove: best_idx parameter and green highlighting logic (lines 502-505)
+Add: current_policy parameter to handle Current column with blue-gray background
+Update: Column iteration to include Current before carriers
+Before:
+
+
+def _add_data_row(self, label, values, row_idx, best_idx, label_col_w, carrier_col_w,
+                  x_start, num_carriers, font_size, row_h):
+    # ... alternating bg logic ...
+    # Value cells with best_idx green highlighting
+    for i in range(num_carriers):
+        if i == best_idx:
+            self.set_fill_color(*BRAND["best_value_bg"])
+        else:
+            self.set_fill_color(*bg)
+After:
+
+
+def _add_data_row(
+    self,
+    label: str,
+    values: list[str],
+    row_idx: int,
+    label_col_w: float,
+    data_col_w: float,
+    x_start: float,
+    font_size: float,
+    row_h: float,
+    current_policy: Optional[CurrentPolicy]
+):
+    """Single data row with alternating background and Current column styling."""
+    self._ensure_space(row_h + 2)
+    y = self.get_y()
+    is_alt = row_idx % 2 == 0
+    bg = BRAND["row_alt"] if is_alt else BRAND["row_white"]
+
+    # Label cell
+    self.set_fill_color(*bg)
+    self.set_text_color(*BRAND["text_dark"])
+    self.set_font(self.font_family_name, "", font_size)
+    self.set_xy(x_start, y)
+    self.cell(label_col_w, row_h, f"  {label}", border="LBR", fill=True, align="L")
+
+    # Data cells (Current + Carriers)
+    for i, val in enumerate(values):
+        x = x_start + label_col_w + i * data_col_w
+        self.set_xy(x, y)
+
+        # First value is Current Policy if it exists
+        if i == 0 and current_policy:
+            self.set_fill_color(*BRAND["current_bg"])
+        else:
+            self.set_fill_color(*bg)
+
+        self.set_font(self.font_family_name, "", font_size)
+        self.set_text_color(*BRAND["text_dark"])
+        self.cell(data_col_w, row_h, val, border="LBR", fill=True, align="C")
+
+    self.ln(row_h)
+15. _fmt_currency (lines 513-524)
+Changes: Update to return simple dash "-" instead of em dash "—" for consistency with Google Sheets formatting.
+
+Before:
+
+
+@staticmethod
+def _fmt_currency(value) -> str:
+    if value is None:
+        return "—"
+    try:
+        v = float(value)
+        if v >= 1000:
+            return f"${v:,.0f}"
+        else:
+            return f"${v:,.2f}"
+    except (ValueError, TypeError):
+        return str(value)
+After:
+
+
+@staticmethod
+def _fmt_currency(value) -> str:
+    if value is None:
+        return "-"  # Simple dash for consistency with Sheets
+    try:
+        v = float(value)
+        if v >= 1000:
+            return f"${v:,.0f}"
+        else:
+            return f"${v:,.2f}"
+    except (ValueError, TypeError):
+        return str(value)
+16. add_endorsements_section (lines 410-446)
+Changes: Update to pull from CarrierBundle structure instead of flat quote dicts.
+
+Before:
+
+
+def add_endorsements_section(self, quotes: list[dict]):
+    for q in quotes:
+        carrier = q.get("carrier_name", "Carrier")
+        endorsements = q.get("endorsements", [])
+        discounts = q.get("discounts_applied", [])
+After:
+
+
+def add_endorsements_section(self, carriers: list[CarrierBundle]):
+    """List endorsements and discounts per carrier."""
+    self.ln(4)
+    self.add_section_title("Endorsements & Discounts")
+
+    for bundle in carriers:
+        # Collect endorsements and discounts from all policies in bundle
+        all_endorsements = []
+        all_discounts = []
+
+        for policy_type in ["home", "auto", "umbrella"]:
+            quote = getattr(bundle, policy_type)
+            if quote:
+                all_endorsements.extend(quote.endorsements)
+                all_discounts.extend(quote.discounts_applied)
+
+        # Deduplicate
+        all_endorsements = list(dict.fromkeys(all_endorsements))
+        all_discounts = list(dict.fromkeys(all_discounts))
+
+        self._ensure_space(18)
+
+        # Carrier sub-header
+        self.set_font(self.font_family_name, "B", 9)
+        self.set_text_color(*BRAND["primary"])
+        self.cell(0, 6, bundle.carrier_name)
+        self.ln(6)
+
+        if all_endorsements:
+            self.set_font(self.font_family_name, "I", 7)
+            self.set_text_color(*BRAND["text_medium"])
+            self.cell(0, 4, "Endorsements:  " + ", ".join(all_endorsements))
+            self.ln(4)
+        else:
+            self.set_font(self.font_family_name, "I", 7)
+            self.set_text_color(*BRAND["text_light"])
+            self.cell(0, 4, "No endorsements listed")
+            self.ln(4)
+
+        if all_discounts:
+            self.set_font(self.font_family_name, "I", 7)
+            self.set_text_color(*BRAND["text_medium"])
+            self.cell(0, 4, "Discounts:  " + ", ".join(all_discounts))
+            self.ln(4)
+
+        self.ln(3)
+17. add_notes_section (lines 448-466)
+Changes: Two-part notes (per-carrier + agent notes).
+
+Before:
+
+
+def add_notes_section(self, quotes: list[dict]):
+    notes_exist = any(q.get("notes") for q in quotes)
+    if not notes_exist:
+        return
+    # ... render per-carrier notes ...
+After:
+
+
+def add_notes_section(
+    self,
+    carriers: list[CarrierBundle],
+    agent_notes: Optional[str] = None
+):
+    """Two-part notes section: per-carrier AI notes + optional agent notes."""
+
+    # Part A: Per-carrier notes (from InsuranceQuote.notes)
+    carrier_notes_exist = False
+    for bundle in carriers:
+        for policy_type in ["home", "auto", "umbrella"]:
+            quote = getattr(bundle, policy_type)
+            if quote and quote.notes:
+                carrier_notes_exist = True
+                break
+
+    if carrier_notes_exist:
+        self.ln(2)
+        self.add_section_title("Carrier Notes")
+
+        for bundle in carriers:
+            # Collect notes from all policies in bundle
+            notes_list = []
+            for policy_type in ["home", "auto", "umbrella"]:
+                quote = getattr(bundle, policy_type)
+                if quote and quote.notes:
+                    notes_list.append(f"{policy_type.title()}: {quote.notes}")
+
+            if notes_list:
+                self._ensure_space(10)
+                self.set_font(self.font_family_name, "B", 8)
+                self.set_text_color(*BRAND["primary"])
+                self.cell(35, 5, bundle.carrier_name + ":")
+                self.set_font(self.font_family_name, "", 7.5)
+                self.set_text_color(*BRAND["text_dark"])
+                self.multi_cell(0, 5, " | ".join(notes_list))
+                self.ln(1)
+
+    # Part B: General agent notes (from session.agent_notes or parameter)
+    if agent_notes and agent_notes.strip():
+        self.ln(2)
+        self.add_section_title("Agent Notes")
+
+        self.set_font(self.font_family_name, "", 8)
+        self.set_text_color(*BRAND["text_dark"])
+        self.multi_cell(0, 5, agent_notes)
+        self.ln(2)
+18. generate_comparison_pdf (lines 530-573)
+Changes: Complete signature and logic rewrite for ComparisonSession input.
+
+Before:
+
+
+def generate_comparison_pdf(
+    client_name: str,
+    quotes: list[dict],
+    output_path: str,
+    logo_path: Optional[str] = None,
+    date_str: Optional[str] = None,
+) -> str:
+    layout = _get_layout(len(quotes))
+    pdf = SciotoComparisonPDF(logo_path=logo_path, orientation=layout["orientation"])
+    # ...
+After:
+
+
+def generate_comparison_pdf(
+    session: ComparisonSession,
+    output_path: str,
+    logo_path: Optional[str] = None,
+    date_str: Optional[str] = None,
+    agent_notes: Optional[str] = None,
+) -> str:
+    """
+    Generate a branded comparison PDF from a ComparisonSession.
+
+    Args:
+        session: ComparisonSession with current_policy, carriers, sections_included
+        output_path: Where to save the PDF
+        logo_path: Path to agency logo PNG (optional)
+        date_str: Override date string (default: session.date)
+        agent_notes: General agent notes (optional, separate from per-carrier notes)
+
+    Returns:
+        The output_path for chaining
+    """
+    # Validate carriers
+    if not session.carriers or len(session.carriers) > 6:
+        raise ValueError("Must have 2-6 carriers")
+
+    # Determine layout
+    has_current = session.current_policy is not None
+    layout = _get_layout(len(session.carriers), has_current)
+
+    # Initialize PDF
+    pdf = SciotoComparisonPDF(logo_path=logo_path, orientation=layout["orientation"])
+    pdf.alias_nb_pages()
+    pdf.add_page()
+
+    # Client info
+    pdf.add_client_section(session.client_name, date_str or session.date)
+
+    # Comparison table (multi-section)
+    pdf.add_section_title("Coverage Comparison")
+    pdf.add_comparison_table(session, layout)
+
+    # Endorsements & Discounts
+    pdf.add_endorsements_section(session.carriers)
+
+    # Notes (two-part)
+    pdf.add_notes_section(session.carriers, agent_notes)
+
+    # Save
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    pdf.output(output_path)
+    return output_path
+Import Additions
+Add to top of file (after existing imports):
+
+
+from typing import Optional
+from pathlib import Path
+from app.extraction.models import ComparisonSession, CarrierBundle, CurrentPolicy, InsuranceQuote
+Model Update: ComparisonSession
+File: app/extraction/models.py (line 119, after sections_included)
+
+Add field:
+
+
+class ComparisonSession(BaseModel):
+    """Complete comparison session with all data."""
+    client_name: str
+    date: str = Field(description="ISO date YYYY-MM-DD")
+    current_policy: Optional[CurrentPolicy] = None
+    carriers: list[CarrierBundle] = Field(default_factory=list, description="2-6 carrier bundles")
+    sections_included: list[str] = Field(
+        default_factory=list,
+        description="Which sections are active: 'home', 'auto', 'umbrella'"
+    )
+    agent_notes: Optional[str] = Field(None, description="General agent notes for PDF export")  # NEW
+This field stores freeform agent notes separate from per-carrier AI-generated notes. Used in the PDF Notes section (Part B).
+
+Font Path Fix for Windows
+Update _register_fonts (lines 74-83):
+
+Before:
+
+
+font_dir = "/usr/share/fonts/truetype/dejavu/"
+After:
+
+
+# Try common font locations (Linux first, then fallback to Helvetica)
+font_locations = [
+    "/usr/share/fonts/truetype/dejavu/",
+    "C:/Windows/Fonts/",
+]
+for font_dir in font_locations:
+    if os.path.exists(font_dir + "DejaVuSans.ttf"):
+        # ... register fonts ...
+        break
+else:
+    self.font_family_name = "Helvetica"
+Or simpler (since CLAUDE.md says Windows primary):
+
+
+# Prefer built-in Helvetica for Windows compatibility
+self.font_family_name = "Helvetica"
+Testing & Verification
+1. Unit Test Structure
+Create tests/test_pdf_generator.py to test:
+
+Layout calculation with/without Current Policy
+Column width calculations
+Data extraction helpers (_extract_premium_row, _extract_home_row, etc.)
+Value formatting (_fmt_currency, _get_auto_limits, _get_umbrella_limits)
+Multi-section rendering logic
+2. Integration Test
+Create a sample ComparisonSession with:
+
+Current Policy populated
+3 carriers (2 with home+auto, 1 with all three)
+sections_included: ["home", "auto", "umbrella"]
+Mix of numeric and text values in coverage_limits
+Per-carrier notes + agent_notes
+Generate PDF and verify:
+
+Current column appears with blue-gray background
+No green highlighting or ★ stars
+Premium Summary at top
+Sections render in correct order
+Footer has no license number
+Total row correctly sums premiums
+Portrait/landscape threshold correct (4 carriers + current = 5 cols = portrait)
+3. Manual Visual Check
+Generate PDFs with:
+
+2 carriers + current (3 data cols, portrait)
+4 carriers + current (5 data cols, portrait)
+5 carriers + current (6 data cols, landscape)
+6 carriers no current (6 data cols, landscape)
+Verify layout scales correctly.
+
+4. Import Test
+After building app/pdf_gen/generator.py, verify the module imports correctly:
+
+
+python -c "from app.pdf_gen.generator import generate_comparison_pdf; print('PDF generator imports OK')"
+5. Run pytest
+
+pytest tests/test_pdf_generator.py -v
+Summary of Changes
+PDF Generator (app/pdf_gen/generator.py)
+Component	Status	Description
+BRAND constants	Modified	Update primary color, remove best_value colors, add current colors
+LAYOUT_CONFIG	Removed	Replaced with inline logic in _get_layout()
+_get_layout()	Modified	Add has_current parameter, adjust thresholds
+__init__	Modified	Remove self.agency_license
+footer()	Modified	Remove license line, keep page number + disclaimer
+_fmt_currency()	Modified	Change em dash "—" to simple dash "-"
+add_comparison_table()	Rewritten	Multi-section layout, no best_idx logic
+_add_section_divider_row()	Modified	Update signature for current_policy + carriers
+_add_data_row()	Modified	Remove best_idx, add Current column styling
+add_endorsements_section()	Modified	Pull from CarrierBundle structure
+add_notes_section()	Modified	Two-part notes (carrier + agent)
+generate_comparison_pdf()	Rewritten	New signature with ComparisonSession
+New methods	Added	_add_table_header, _add_premium_section, _add_home_section, _add_auto_section, _add_umbrella_section, _add_total_row, _extract_premium_row, _extract_home_row, _extract_auto_row, _extract_umbrella_row, _get_auto_limits, _get_umbrella_limits
+Preserved exactly: _register_fonts, _space_remaining, _ensure_space, header, _draw_branded_header, _draw_continuation_header, add_client_section, add_section_title
+
+Data Model (app/extraction/models.py)
+Component	Status	Description
+ComparisonSession	Modified	Add agent_notes: Optional[str] field after sections_included

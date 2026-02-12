@@ -273,54 +273,34 @@ print(f'Sheet created: {url}')
 
 ## Phase 4: PDF Generation (Evening 4)
 
-### Step 9: HTML Template
+### Step 9: HTML Template -- SKIPPED (2026-02-11)
 
-**Build:** `app/pdf_gen/templates/comparison.html`
+**Status:** SKIPPED — fpdf2 implementation does not require HTML templates
 
-**Requirements:**
-- Jinja2 template that renders a complete HTML document
-- Design per PROJECT_SPEC.md (navy header, green best-value, gray alternating rows)
-- Template variables: `agency_name`, `agency_phone`, `agency_license`, `client_name`, `date`, `quotes` (list), `best_premium_index` (int)
-- `{% for quote in quotes %}` generates dynamic carrier columns (2–6)
-- `@page` CSS rules for Letter size, 0.75" margins, page numbers in footer
-- Coverage rows: dwelling, other structures, personal property, loss of use, liability, medical payments, deductible
-- Bold premium summary row
-- Footer with license number and disclaimer: "This comparison is for informational purposes only. Coverage details should be verified with the carrier."
-- All CSS embedded in `<style>` tag (no external stylesheets)
+**Rationale:** The PDF generator uses fpdf2 for programmatic PDF generation with full control over layout, fonts, and styling. No Jinja2 HTML templates or WeasyPrint needed.
 
 ---
 
-### Step 10: PDF Generator
+### Step 10: PDF Generator -- COMPLETE (2026-02-11)
 
 **Build:** `app/pdf_gen/generator.py`
 
-**Requirements:**
-- Function `generate_comparison_pdf(quotes: list[InsuranceQuote], client_name: str, output_path: str) -> str`
-- Determine `best_premium_index` (index of quote with lowest `annual_premium`)
-- Load and render Jinja2 template with quote data + agency info from config
-- Try WeasyPrint first: `weasyprint.HTML(string=html).write_pdf(output_path)`
-- If WeasyPrint `ImportError`, fall back to FPDF2:
-  - Create table with `pdf.table()` context manager
-  - Carriers as columns, coverage types as rows
-  - Apply basic styling (colors, bold headers)
-- Return the `output_path`
-- Auto-create output directory if missing
+**Requirements (Updated per PDF_GEN_SPEC.md):**
+- Function `generate_comparison_pdf(session: ComparisonSession, output_path: str, ...) -> str`
+- Multi-section layout: Premium Summary → Home Details → Auto Details → Umbrella Details
+- Current Policy column with blue-gray styling (not green highlighting)
+- Responsive portrait/landscape based on total data columns (current + carriers)
+- No "best value" green highlighting or ★ star markers
+- Footer: page number + disclaimer only (no license number)
+- Two-part notes section: per-carrier AI notes + optional agent notes
+- Value formatting: `-` for None, currency strings for numbers, pass-through for text values
 
 **Verify:**
 ```bash
-python -c "
-from app.pdf_gen.generator import generate_comparison_pdf
-from app.extraction.models import InsuranceQuote
-quotes = [
-    InsuranceQuote(carrier_name='State Farm', policy_type='HO3', annual_premium=1200, deductible=500, coverage_limits={'dwelling': 300000, 'personal_property': 150000, 'personal_liability': 100000}, endorsements=['Water backup'], exclusions=[], confidence='high'),
-    InsuranceQuote(carrier_name='Erie', policy_type='HO3', annual_premium=1050, deductible=1000, coverage_limits={'dwelling': 300000, 'personal_property': 150000, 'personal_liability': 100000}, endorsements=[], exclusions=[], confidence='high'),
-    InsuranceQuote(carrier_name='Progressive', policy_type='HO3', annual_premium=1350, deductible=500, coverage_limits={'dwelling': 300000, 'personal_property': 150000, 'personal_liability': 100000}, endorsements=[], exclusions=[], confidence='medium'),
-]
-path = generate_comparison_pdf(quotes, 'Smith Family', 'data/outputs/test_comparison.pdf')
-print(f'PDF created: {path}')
-"
-# Open the PDF and visually inspect
+python -c "from app.pdf_gen.generator import generate_comparison_pdf; print('PDF generator imports OK')"
 ```
+
+**Verification Result:** ✅ PDF generator imports OK
 
 ---
 
@@ -590,3 +570,54 @@ Create a desktop shortcut pointing to `run.bat`.
 - Conditional section population: Only writes data if section in `sections_included`, otherwise leaves blank
 
 **Verification:** `from app.sheets.sheets_client import SheetsClient, TemplateNotFoundError, SpreadsheetNotFoundError; print('Sheets client imports OK')` — All imports successful.
+
+### 2026-02-11 — Phase 4, Steps 9-10: PDF Generator
+
+**Status:** COMPLETE (Step 9 skipped, Step 10 complete)
+
+**Built:** `app/pdf_gen/generator.py` — Branded PDF generator with multi-policy comparison layout
+
+**Details:**
+- **Model update:** Added `agent_notes: Optional[str]` field to `ComparisonSession` in `app/extraction/models.py:120`
+- **Class:** `SciotoComparisonPDF(FPDF)` — Custom FPDF subclass with Scioto Insurance Group branding
+- **Public API:** `generate_comparison_pdf(session: ComparisonSession, output_path, logo_path, date_str, agent_notes) -> str`
+- **Brand constants updated:**
+  - Primary color: `(135, 28, 48)` — maroon #871c30 (was deep crimson)
+  - Removed: `best_value_bg`, `best_value_border` (no green highlighting)
+  - Added: `current_bg` (230, 240, 248), `current_header` (180, 200, 220) — light blue-gray for Current Policy column
+- **Layout logic:** Dynamic `_get_layout(num_carriers, has_current)` function
+  - Total data columns = num_carriers + (1 if has_current else 0)
+  - Portrait: 2-5 data columns (responsive font/row scaling)
+  - Landscape: 6-7 data columns (tighter fonts for 6+ carriers)
+- **Multi-section table structure:**
+  - Table header: Label | Current | Carrier 1 | ... | Carrier N
+  - Premium Summary section (always shown): Home, Auto, Umbrella, Total rows
+  - Home Details section (if "home" in sections_included): 8 rows (Dwelling through Wind/Hail Deductible)
+  - Auto Details section (if "auto" in sections_included): 4 rows (Limits, UM/UIM, Comp/Collision Deductibles)
+  - Umbrella Details section (if "umbrella" in sections_included): 2 rows (Limits, Deductible)
+- **Current Policy column:** Blue-gray background distinguishes baseline from carrier quotes
+- **Removed features:**
+  - No green "best value" highlighting
+  - No ★ star markers
+  - No `agency_license` in footer (page number + disclaimer only)
+- **Two-part notes section:**
+  - Part A: Per-carrier notes from `InsuranceQuote.notes` (AI-generated caveats)
+  - Part B: General agent notes from `session.agent_notes` parameter (freeform text)
+- **Helper methods (12 new):**
+  - Section builders: `_add_table_header`, `_add_premium_section`, `_add_home_section`, `_add_auto_section`, `_add_umbrella_section`, `_add_total_row`
+  - Data extractors: `_extract_premium_row`, `_extract_home_row`, `_extract_auto_row`, `_extract_umbrella_row`
+  - Value formatters: `_get_auto_limits` (BI/BI/PD or CSL), `_get_umbrella_limits` (XM CSL)
+- **Updated helpers:**
+  - `_add_section_divider_row`: Now accepts `current_policy` and `carriers` for dynamic column count calculation
+  - `_add_data_row`: Removed `best_idx`, added Current column blue-gray styling logic
+  - `_fmt_currency`: Returns `"-"` instead of `"—"` for None values (consistency with Sheets client)
+  - `add_endorsements_section`: Pulls from `CarrierBundle.home/auto/umbrella`, deduplicates across policies
+  - `add_notes_section`: Two-part rendering (carrier notes + agent notes)
+- **Preserved from existing code:**
+  - `_register_fonts()`: DejaVu with Helvetica fallback (Windows compatible)
+  - `_draw_branded_header()`, `_draw_continuation_header()`: Full crimson banner on page 1, slim header on subsequent pages
+  - `add_client_section()`: "Prepared for" + date banner with cream background
+  - `add_section_title()`: Crimson accent bar with uppercase title
+  - `_ensure_space()`, `_space_remaining()`: Auto page breaks before footer zone
+
+**Verification:** `python -c "from app.pdf_gen.generator import generate_comparison_pdf; print('PDF generator imports OK')"` — PDF generator imports OK
