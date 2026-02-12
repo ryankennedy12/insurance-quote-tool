@@ -306,9 +306,9 @@ python -c "from app.pdf_gen.generator import generate_comparison_pdf; print('PDF
 
 ## Phase 5: Web UI (Weekend Session)
 
-### Step 11: Streamlit Application
+### Step 11: Streamlit Wizard Skeleton -- COMPLETE (2026-02-11)
 
-**Build:** `app/main.py` (can also split into `app/ui/upload_page.py`, `review_page.py`, `output_page.py` and import)
+**Build:** `app/ui/streamlit_app.py` (wizard skeleton with session state management)
 
 **Requirements:**
 - `st.set_page_config(page_title="Quote Comparison Tool", layout="wide")`
@@ -641,3 +641,41 @@ Create a desktop shortcut pointing to `run.bat`.
 - Replaces similar-colored pixels (tolerance=30) with transparency
 - Generated `assets/logo_transparent.png` — 90.2% of pixels made transparent
 - Visual test suite now uses transparent logo for seamless header integration
+
+### 2026-02-11 — Phase 5, Step 11: Streamlit Wizard Skeleton
+
+**Status:** COMPLETE
+
+**Built:** `app/ui/streamlit_app.py` — Streamlit wizard skeleton with progressive stage unlocking
+
+**Details:**
+- **Session state schema:** 17 state keys across 5 categories (wizard navigation, upload data, carrier data, extraction results, review data, export)
+- **Three-stage wizard flow:**
+  - Step 1 (Upload & Extract): Client name input, sections multiselect, current policy mode radio, placeholder carrier uploads, Extract button
+  - Step 2 (Review & Edit): Locked until `extraction_complete == True`, placeholder for editable tables
+  - Step 3 (Export): Locked until `review_complete == True`, agent notes textarea, disabled export buttons
+- **Progressive unlocking:** Step 2 only renders when extraction complete, Step 3 only renders when review complete
+- **Expander-based UI:** Each step is an expandable section with checkmark (✅) when completed
+- **Sidebar:** Logo display, session info (client name, carrier count, sections), Reset Session button
+- **State management:** Single `init_session_state()` function initializes all 17 keys with defaults
+- **Navigation:** Extract button sets `extraction_complete = True` and advances to Step 2; Approve button sets `review_complete = True` and advances to Step 3
+- **Reset functionality:** Reset Session button clears all state and returns to Step 1
+
+**Also created:**
+- `.streamlit/config.toml` — Scioto maroon theme (#871c30), cream secondary background, 25MB max upload size
+- `app/ui/components/__init__.py` — Placeholder for future component modules
+
+**Key patterns:**
+- Uses `key=` parameter on all input widgets for automatic session_state binding
+- Uses `st.rerun()` for navigation after state changes (not deprecated experimental version)
+- All render functions separated: `render_upload_stage()`, `render_review_stage()`, `render_export_stage()`, `render_sidebar()`
+
+**What this step does NOT include:**
+- No real PDF extraction logic (placeholder Extract button just flips state)
+- No manual entry forms for current policy
+- No carrier add/remove dynamic UI
+- No editable data tables
+- No real export functionality
+- Real logic deferred to Steps 12-14
+
+**Verification:** `python app/ui/streamlit_app.py` — All imports OK, script executes without errors (ScriptRunContext warnings expected when running directly)
