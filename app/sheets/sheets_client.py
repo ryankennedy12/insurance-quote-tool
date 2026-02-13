@@ -12,7 +12,11 @@ from app.extraction.models import (
     CurrentPolicy,
     InsuranceQuote,
 )
-from app.utils.config import GOOGLE_SERVICE_ACCOUNT_FILE, SPREADSHEET_ID
+from app.utils.config import (
+    GOOGLE_SERVICE_ACCOUNT_FILE,
+    LOGO_DRIVE_FILE_ID,
+    SPREADSHEET_ID,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +178,19 @@ class SheetsClient:
                 has_current_policy=session.current_policy is not None,
             )
 
-            # 5. Construct URL
+            # 5. Insert logo into merged A1:A2 (if configured)
+            if LOGO_DRIVE_FILE_ID:
+                logo_url = (
+                    f"https://drive.google.com/uc?id={LOGO_DRIVE_FILE_ID}"
+                )
+                new_ws.update(
+                    [[f'=IMAGE("{logo_url}",2)']],
+                    "A1",
+                    value_input_option="USER_ENTERED",
+                )
+                logger.info("Inserted logo formula into A1")
+
+            # 6. Construct URL
             url = (
                 f"https://docs.google.com/spreadsheets/d/"
                 f"{SPREADSHEET_ID}/edit#gid={new_ws.id}"

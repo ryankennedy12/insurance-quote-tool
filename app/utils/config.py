@@ -21,6 +21,7 @@ SPREADSHEET_ID: str = os.getenv("SPREADSHEET_ID", "")
 GOOGLE_SERVICE_ACCOUNT_FILE: str = os.getenv(
     "GOOGLE_SERVICE_ACCOUNT_FILE", "./secrets/service_account.json"
 )
+LOGO_DRIVE_FILE_ID: str = os.getenv("LOGO_DRIVE_FILE_ID", "")
 
 # --- Agency branding ---
 AGENCY_NAME: str = os.getenv("AGENCY_NAME", "Your Insurance Agency")
