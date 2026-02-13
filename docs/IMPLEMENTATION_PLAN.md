@@ -1041,3 +1041,29 @@ Full Streamlit wizard is working end-to-end: Upload → Extract → Review & Edi
 - `python -m pytest tests/test_pdf_unicode.py -v` — 18 passed in 1.66s
 - `python tests/test_pdf_visual.py` — All 4 visual test PDFs generate successfully
 - Unicode test PDF generated at `data/outputs/unicode_test.pdf` — visual confirmation of clean ASCII output
+
+### Step 21: PDF Polish — Date Format, Notes Cleanup, Umbrella Page Break — COMPLETE
+
+**Modified files:**
+- `app/ui/streamlit_app.py` — Readable date format for PDF display
+- `app/pdf_gen/generator.py` — Bracket tag stripping, umbrella page break fix
+
+**Fix 1 — Readable date format:**
+- `_build_comparison_session()`: Changed `strftime("%Y-%m-%d")` → `strftime("%B %d, %Y")` (e.g., "February 13, 2026")
+- `session.date` now carries the readable format used on the PDF
+- PDF filename still uses YYYY-MM-DD via separate `file_date` variable
+- Removed redundant `date_str=` parameter from `generate_comparison_pdf()` call — PDF generator now uses `session.date` directly
+
+**Fix 2 — Strip bracket tags from notes:**
+- Added `_strip_bracket_tag()` helper with regex `^\s*\[\w+\]\s*` to remove leading tags like `[home]`, `[auto]`, `[umbrella]`
+- Applied in `add_notes_section()` before rendering per-carrier notes
+- Notes like `[home] Wind/hail deductible is 2%` now render as `Home: Wind/hail deductible is 2%` — the `{policy_type.title()}:` prefix already provides that context
+
+**Fix 3 — Umbrella section page break:**
+- Added `self._ensure_space(90)` at the top of `_add_umbrella_section()` before the section divider renders
+- Prevents the "UMBRELLA DETAILS" header from landing on page 1 while its data rows spill onto page 2
+- 90mm threshold ensures the header + both data rows (Limits, Deductible) stay together on the same page
+
+**Verification:**
+- `python -m pytest tests/ -v` — 18 passed
+- All three fixes are presentation-only; no business logic changed

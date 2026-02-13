@@ -1099,7 +1099,7 @@ def render_review_stage() -> None:
 
 def _build_comparison_session() -> ComparisonSession:
     """Build ComparisonSession from edited data for export."""
-    date_str = datetime.now().strftime("%Y-%m-%d")
+    date_str = datetime.now().strftime("%B %d, %Y")
     return ComparisonSession(
         client_name=st.session_state.client_name,
         date=date_str,
@@ -1138,8 +1138,8 @@ def render_export_stage() -> None:
                 output_dir.mkdir(parents=True, exist_ok=True)
 
                 safe_name = session.client_name.replace(" ", "_")
-                date_str = datetime.now().strftime("%Y-%m-%d")
-                output_path = str(output_dir / f"{safe_name}_comparison_{date_str}.pdf")
+                file_date = datetime.now().strftime("%Y-%m-%d")
+                output_path = str(output_dir / f"{safe_name}_comparison_{file_date}.pdf")
 
                 logo_path = "assets/logo_transparent.png"
                 if not Path(logo_path).exists():
@@ -1149,7 +1149,6 @@ def render_export_stage() -> None:
                     session=session,
                     output_path=output_path,
                     logo_path=logo_path,
-                    date_str=date_str,
                     agent_notes=session.agent_notes,
                 )
 

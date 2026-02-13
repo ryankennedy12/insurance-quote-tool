@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 import os
+import re
 
 from app.extraction.models import ComparisonSession, CarrierBundle, CurrentPolicy, InsuranceQuote
 
@@ -79,6 +80,16 @@ def _sanitize_text(text: str) -> str:
     for unicode_char, ascii_char in replacements.items():
         text = text.replace(unicode_char, ascii_char)
     return text
+
+
+_BRACKET_TAG_RE = re.compile(r"^\s*\[\w+\]\s*")
+
+
+def _strip_bracket_tag(text: str) -> str:
+    """Remove leading bracket tags like [home], [auto] from note strings."""
+    if not isinstance(text, str):
+        return text
+    return _BRACKET_TAG_RE.sub("", text)
 
 
 class SciotoComparisonPDF(FPDF):
@@ -541,6 +552,8 @@ class SciotoComparisonPDF(FPDF):
         carriers: list[CarrierBundle]
     ):
         """Umbrella Details section: Limits, Deductible."""
+        # Keep header + tables together — break before if insufficient space
+        self._ensure_space(90)
         self.ln(3)
         self._add_section_divider_row(
             "UMBRELLA DETAILS", label_col_w, data_col_w, x_start, body_font,
@@ -943,7 +956,8 @@ class SciotoComparisonPDF(FPDF):
                 for policy_type in ["home", "auto", "umbrella"]:
                     quote = getattr(bundle, policy_type)
                     if quote and quote.notes:
-                        notes_list.append(f"{policy_type.title()}: {quote.notes}")
+                        clean_note = _strip_bracket_tag(quote.notes)
+                        notes_list.append(f"{policy_type.title()}: {clean_note}")
 
                 if notes_list:
                     self._ensure_space(10)
