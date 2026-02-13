@@ -57,6 +57,30 @@ def _get_layout(num_carriers: int, has_current: bool) -> dict:
         return {"orientation": "L", "label_w": 46, "header_font": 7, "body_font": 6.5, "row_h": 7}
 
 
+def _sanitize_text(text: str) -> str:
+    """Replace Unicode characters with ASCII equivalents for Helvetica compatibility."""
+    if not isinstance(text, str):
+        return text
+    replacements = {
+        "\u2013": "-",   # en dash
+        "\u2014": "-",   # em dash
+        "\u2018": "'",   # left single quote
+        "\u2019": "'",   # right single quote
+        "\u201c": '"',   # left double quote
+        "\u201d": '"',   # right double quote
+        "\u2022": "-",   # bullet
+        "\u2026": "...", # ellipsis
+        "\u00a0": " ",   # non-breaking space
+        "\u2010": "-",   # hyphen
+        "\u2011": "-",   # non-breaking hyphen
+        "\u2012": "-",   # figure dash
+        "\u00b7": "-",   # middle dot
+    }
+    for unicode_char, ascii_char in replacements.items():
+        text = text.replace(unicode_char, ascii_char)
+    return text
+
+
 class SciotoComparisonPDF(FPDF):
     """Custom FPDF subclass with Scioto Insurance Group branding."""
 
@@ -73,6 +97,14 @@ class SciotoComparisonPDF(FPDF):
         self.agency_name = "Scioto Insurance Group"
         self.agency_phone = "(614) 555-0199"
         self.agency_email = "quotes@sciotoinsurance.com"
+
+    def cell(self, w=None, h=None, text="", *args, **kwargs):
+        """Override to sanitize text before rendering (safety net)."""
+        return super().cell(w, h, _sanitize_text(text), *args, **kwargs)
+
+    def multi_cell(self, w, h=None, text="", *args, **kwargs):
+        """Override to sanitize text before rendering (safety net)."""
+        return super().multi_cell(w, h, _sanitize_text(text), *args, **kwargs)
 
     def _register_fonts(self):
         """Register bundled DejaVu fonts for professional typography."""
@@ -129,14 +161,14 @@ class SciotoComparisonPDF(FPDF):
         self.set_font(self.font_family_name, "B", 16)
         self.set_text_color(*BRAND["white"])
         self.set_xy(page_w - 110, 8)
-        self.cell(100, 8, self.agency_name, align="R")
+        self.cell(100, 8, _sanitize_text(self.agency_name), align="R")
 
         self.set_font(self.font_family_name, "", 8)
         self.set_text_color(*BRAND["cream"])
         self.set_xy(page_w - 110, 17)
-        self.cell(100, 5, self.agency_phone, align="R")
+        self.cell(100, 5, _sanitize_text(self.agency_phone), align="R")
         self.set_xy(page_w - 110, 22)
-        self.cell(100, 5, self.agency_email, align="R")
+        self.cell(100, 5, _sanitize_text(self.agency_email), align="R")
 
         # Decorative thin line under banner
         self.set_draw_color(*BRAND["primary_light"])
@@ -154,11 +186,11 @@ class SciotoComparisonPDF(FPDF):
         self.set_font(self.font_family_name, "B", 8)
         self.set_text_color(*BRAND["white"])
         self.set_xy(10, 2)
-        self.cell(0, 8, self.agency_name, align="L")
+        self.cell(0, 8, _sanitize_text(self.agency_name), align="L")
 
         self.set_font(self.font_family_name, "", 8)
         self.set_xy(page_w - 50, 2)
-        self.cell(40, 8, f"Page {self.page_no()}", align="R")
+        self.cell(40, 8, _sanitize_text(f"Page {self.page_no()}"), align="R")
 
         self.set_y(16)
 
@@ -175,15 +207,17 @@ class SciotoComparisonPDF(FPDF):
         self.set_font(self.font_family_name, "I", 7)
         self.set_text_color(*BRAND["text_medium"])
         # Centered page number
-        self.cell(0, 4, f"Page {self.page_no()}/{{nb}}", align="C")
+        self.cell(0, 4, _sanitize_text(f"Page {self.page_no()}/{{nb}}"), align="C")
 
         self.ln(4)
         self.set_font(self.font_family_name, "", 5.5)
         self.multi_cell(
             0, 3,
-            "This comparison is for informational purposes only and does not constitute a contract of insurance. "
-            "Coverage is subject to the terms, conditions, and exclusions of each carrier's policy. "
-            "Please review full policy documents before making a decision.",
+            _sanitize_text(
+                "This comparison is for informational purposes only and does not constitute a contract of insurance. "
+                "Coverage is subject to the terms, conditions, and exclusions of each carrier's policy. "
+                "Please review full policy documents before making a decision."
+            ),
             align="C",
         )
 
@@ -203,23 +237,23 @@ class SciotoComparisonPDF(FPDF):
         self.set_xy(20, y_start + 2)
         self.set_font(self.font_family_name, "", 7)
         self.set_text_color(*BRAND["text_medium"])
-        self.cell(0, 4, "PREPARED FOR")
+        self.cell(0, 4, _sanitize_text("PREPARED FOR"))
 
         self.set_xy(20, y_start + 7)
         self.set_font(self.font_family_name, "B", 13)
         self.set_text_color(*BRAND["primary"])
-        self.cell(0, 6, client_name)
+        self.cell(0, 6, _sanitize_text(client_name))
 
         # Right side: Date
         self.set_xy(self.w - 80, y_start + 2)
         self.set_font(self.font_family_name, "", 7)
         self.set_text_color(*BRAND["text_medium"])
-        self.cell(60, 4, "DATE", align="R")
+        self.cell(60, 4, _sanitize_text("DATE"), align="R")
 
         self.set_xy(self.w - 80, y_start + 7)
         self.set_font(self.font_family_name, "B", 10)
         self.set_text_color(*BRAND["primary"])
-        self.cell(60, 6, date_str, align="R")
+        self.cell(60, 6, _sanitize_text(date_str), align="R")
 
         self.set_y(y_start + 20)
 
@@ -240,7 +274,7 @@ class SciotoComparisonPDF(FPDF):
         self.set_xy(21, y)
         self.set_font(self.font_family_name, "B", 11)
         self.set_text_color(*BRAND["primary_dark"])
-        self.cell(0, 7, title.upper())
+        self.cell(0, 7, _sanitize_text(title.upper()))
         self.ln(10)
 
     def add_comparison_table(
@@ -319,7 +353,7 @@ class SciotoComparisonPDF(FPDF):
         self.set_text_color(*BRAND["white"])
         self.set_font(self.font_family_name, "B", header_font)
         self.set_xy(x_start, y)
-        self.cell(label_col_w, 10, "  COVERAGE", border=1, fill=True, align="L")
+        self.cell(label_col_w, 10, _sanitize_text("  COVERAGE"), border=1, fill=True, align="L")
 
         col_idx = 0
 
@@ -329,7 +363,7 @@ class SciotoComparisonPDF(FPDF):
             self.set_xy(x, y)
             self.set_fill_color(*BRAND["current_header"])
             self.set_text_color(*BRAND["white"])
-            self.cell(data_col_w, 10, current_policy.carrier_name, border=1, fill=True, align="C")
+            self.cell(data_col_w, 10, _sanitize_text(current_policy.carrier_name), border=1, fill=True, align="C")
             col_idx += 1
 
         # Carrier columns
@@ -341,7 +375,7 @@ class SciotoComparisonPDF(FPDF):
             name = carrier.carrier_name
             if data_col_w < 35 and len(name) > 14:
                 name = name[:13] + "..."
-            self.cell(data_col_w, 10, name, border=1, fill=True, align="C")
+            self.cell(data_col_w, 10, _sanitize_text(name), border=1, fill=True, align="C")
             col_idx += 1
 
         self.ln(10)
@@ -551,7 +585,7 @@ class SciotoComparisonPDF(FPDF):
         self.set_text_color(*BRAND["primary_dark"])
         self.set_font(self.font_family_name, "B", body_font + 1)
         self.set_xy(x_start, y)
-        self.cell(label_col_w, row_h + 2, "  Total", border=1, fill=True, align="L")
+        self.cell(label_col_w, row_h + 2, _sanitize_text("  Total"), border=1, fill=True, align="L")
 
         col_idx = 0
 
@@ -561,7 +595,7 @@ class SciotoComparisonPDF(FPDF):
             self.set_xy(x, y)
             self.set_fill_color(*BRAND["current_bg"])
             self.set_text_color(*BRAND["primary_dark"])
-            total_str = self._fmt_currency(current_policy.total_premium)
+            total_str = _sanitize_text(self._fmt_currency(current_policy.total_premium))
             self.cell(data_col_w, row_h + 2, total_str, border=1, fill=True, align="C")
             col_idx += 1
 
@@ -571,7 +605,7 @@ class SciotoComparisonPDF(FPDF):
             self.set_xy(x, y)
             self.set_fill_color(*BRAND["cream"])
             self.set_text_color(*BRAND["primary_dark"])
-            total_str = self._fmt_currency(carrier.total_premium)
+            total_str = _sanitize_text(self._fmt_currency(carrier.total_premium))
             self.cell(data_col_w, row_h + 2, total_str, border=1, fill=True, align="C")
             col_idx += 1
 
@@ -778,7 +812,7 @@ class SciotoComparisonPDF(FPDF):
         self.set_text_color(*BRAND["white"])
         self.set_font(self.font_family_name, "B", font_size - 1)
         self.set_xy(x_start, y)
-        self.cell(total_w, 6, f"  {title}", border=1, fill=True, align="L")
+        self.cell(total_w, 6, _sanitize_text(f"  {title}"), border=1, fill=True, align="L")
         self.ln(6)
 
     def _add_data_row(
@@ -804,7 +838,7 @@ class SciotoComparisonPDF(FPDF):
         self.set_text_color(*BRAND["text_dark"])
         self.set_font(self.font_family_name, "", font_size)
         self.set_xy(x_start, y)
-        self.cell(label_col_w, row_h, f"  {label}", border="LBR", fill=True, align="L")
+        self.cell(label_col_w, row_h, _sanitize_text(f"  {label}"), border="LBR", fill=True, align="L")
 
         # Data cells (Current + Carriers)
         for i, val in enumerate(values):
@@ -819,7 +853,7 @@ class SciotoComparisonPDF(FPDF):
 
             self.set_font(self.font_family_name, "", font_size)
             self.set_text_color(*BRAND["text_dark"])
-            self.cell(data_col_w, row_h, val, border="LBR", fill=True, align="C")
+            self.cell(data_col_w, row_h, _sanitize_text(val), border="LBR", fill=True, align="C")
 
         self.ln(row_h)
 
@@ -834,7 +868,7 @@ class SciotoComparisonPDF(FPDF):
             else:
                 return f"${v:,.2f}"
         except (ValueError, TypeError):
-            return str(value)
+            return _sanitize_text(str(value))
 
     def add_endorsements_section(self, carriers: list[CarrierBundle]):
         """List endorsements and discounts per carrier."""
@@ -861,24 +895,24 @@ class SciotoComparisonPDF(FPDF):
             # Carrier sub-header
             self.set_font(self.font_family_name, "B", 9)
             self.set_text_color(*BRAND["primary"])
-            self.cell(0, 6, bundle.carrier_name)
+            self.cell(0, 6, _sanitize_text(bundle.carrier_name))
             self.ln(6)
 
             if all_endorsements:
                 self.set_font(self.font_family_name, "I", 7)
                 self.set_text_color(*BRAND["text_medium"])
-                self.cell(0, 4, "Endorsements:  " + ", ".join(all_endorsements))
+                self.cell(0, 4, _sanitize_text("Endorsements:  " + ", ".join(all_endorsements)))
                 self.ln(4)
             else:
                 self.set_font(self.font_family_name, "I", 7)
                 self.set_text_color(*BRAND["text_light"])
-                self.cell(0, 4, "No endorsements listed")
+                self.cell(0, 4, _sanitize_text("No endorsements listed"))
                 self.ln(4)
 
             if all_discounts:
                 self.set_font(self.font_family_name, "I", 7)
                 self.set_text_color(*BRAND["text_medium"])
-                self.cell(0, 4, "Discounts:  " + ", ".join(all_discounts))
+                self.cell(0, 4, _sanitize_text("Discounts:  " + ", ".join(all_discounts)))
                 self.ln(4)
 
             self.ln(3)
@@ -915,10 +949,10 @@ class SciotoComparisonPDF(FPDF):
                     self._ensure_space(10)
                     self.set_font(self.font_family_name, "B", 8)
                     self.set_text_color(*BRAND["primary"])
-                    self.cell(35, 5, bundle.carrier_name + ":")
+                    self.cell(35, 5, _sanitize_text(bundle.carrier_name + ":"))
                     self.set_font(self.font_family_name, "", 7.5)
                     self.set_text_color(*BRAND["text_dark"])
-                    self.multi_cell(0, 5, " | ".join(notes_list))
+                    self.multi_cell(0, 5, _sanitize_text(" | ".join(notes_list)))
                     self.ln(1)
 
         # Part B: General agent notes (from session.agent_notes or parameter)
@@ -928,7 +962,7 @@ class SciotoComparisonPDF(FPDF):
 
             self.set_font(self.font_family_name, "", 8)
             self.set_text_color(*BRAND["text_dark"])
-            self.multi_cell(0, 5, agent_notes)
+            self.multi_cell(0, 5, _sanitize_text(agent_notes))
             self.ln(2)
 
 

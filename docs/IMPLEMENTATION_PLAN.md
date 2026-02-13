@@ -979,3 +979,65 @@ Full Streamlit wizard is working end-to-end: Upload → Extract → Review & Edi
 **Import added:** `base64` (for inline logo embedding)
 
 **Verification:** Syntax check passed. Streamlit app loads and renders correctly at `http://localhost:8501`. Visual verification via Playwright screenshots confirmed: branded header, step indicator, hidden defaults, maroon buttons, card layouts, clean spacing.
+
+---
+
+## Phase 8: Bug Fixes & Hardening (2026-02-12)
+
+### Step 20: PDF Unicode Sanitizer — COMPLETE
+
+**Bug:** `FPDFUnicodeEncodingException: Character "\u2013" at index 268 in text is outside the range of characters supported by the font used: "helveticaI".`
+
+**Root cause:** AI-extracted text from Gemini contains Unicode characters (en dashes, smart quotes, bullets, ellipsis) that Helvetica's Latin-1 encoding cannot render. The crash occurred specifically in italic font (`helveticaI`) when rendering endorsements and discounts.
+
+**Modified files:**
+- `app/pdf_gen/generator.py` — Added `_sanitize_text()` function + wrapped all 28 `cell()`/`multi_cell()` call sites
+
+**New files:**
+- `tests/test_pdf_unicode.py` — 18 tests (12 unit + 6 integration) reproducing and preventing the crash
+
+**Fix — `_sanitize_text()` function (module-level):**
+
+| Unicode Character | Code Point | Replacement |
+|-------------------|------------|-------------|
+| En dash | `\u2013` | `-` |
+| Em dash | `\u2014` | `-` |
+| Left single quote | `\u2018` | `'` |
+| Right single quote | `\u2019` | `'` |
+| Left double quote | `\u201c` | `"` |
+| Right double quote | `\u201d` | `"` |
+| Bullet | `\u2022` | `-` |
+| Ellipsis | `\u2026` | `...` |
+| Non-breaking space | `\u00a0` | ` ` |
+| Unicode hyphen | `\u2010` | `-` |
+| Non-breaking hyphen | `\u2011` | `-` |
+| Figure dash | `\u2012` | `-` |
+| Middle dot | `\u00b7` | `-` |
+
+**Two-layer defense:**
+1. **Safety-net overrides:** `cell()` and `multi_cell()` overridden on `SciotoComparisonPDF` to sanitize any text argument automatically
+2. **Explicit call-site wrapping:** All 28 `cell()`/`multi_cell()` calls explicitly wrap their text argument with `_sanitize_text()` — no exceptions
+
+**Additional sanitization point:**
+- `_fmt_currency()` fallback path: `str(value)` wrapped with `_sanitize_text()` for AI-extracted pass-through text values
+
+**Test coverage (`tests/test_pdf_unicode.py`):**
+
+*Unit tests (12) — `TestSanitizeText`:*
+- Individual replacement for each of the 13 mapped characters
+- Multiple replacements in one string + verification that zero non-ASCII characters remain in output
+- ASCII passthrough (no modification to clean strings)
+- Non-string passthrough (int/None returned unchanged)
+
+*Integration tests (6) — `TestPDFUnicodeGeneration`:*
+- `test_full_comparison_with_unicode` — Full session with Unicode in every text field (client name, carrier names, endorsements, discounts, notes, agent notes) across home + auto + umbrella
+- `test_unicode_in_agent_notes_only` — Smart quotes and en dashes in agent notes (multi_cell path)
+- `test_unicode_in_carrier_name` — En dash + non-breaking space in carrier name (table header cells)
+- `test_unicode_in_client_name` — Smart apostrophe in client name (bold font path)
+- `test_endorsements_italic_font_crash` — Direct reproduction of the exact bug: en dash in endorsement text rendered in `helveticaI`
+- `test_all_unicode_chars_at_once` — Stress test with every mapped character in a single string
+
+**Verification:**
+- `python -m pytest tests/test_pdf_unicode.py -v` — 18 passed in 1.66s
+- `python tests/test_pdf_visual.py` — All 4 visual test PDFs generate successfully
+- Unicode test PDF generated at `data/outputs/unicode_test.pdf` — visual confirmation of clean ASCII output
