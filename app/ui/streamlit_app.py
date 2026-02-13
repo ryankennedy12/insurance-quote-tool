@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Optional
 
 from app.extraction.models import ComparisonSession, CarrierBundle, CurrentPolicy, InsuranceQuote, CoverageLimits
-from app.extraction.ai_extractor import extract_and_validate
+from app.extraction.ai_extractor import extract_and_validate, extract_and_validate_multi
+from app.extraction.carrier_config import get_combined_sections, classify_policy_type
 from app.pdf_gen.generator import generate_comparison_pdf
 from app.sheets.sheets_client import SheetsClient
 
@@ -150,7 +151,7 @@ def _validate_upload_stage() -> list[str]:
         has_pdf = any(
             carrier.get(f"{section}_pdf") is not None
             for section in st.session_state.sections_included
-        )
+        ) or carrier.get("combined_pdf") is not None
         if not has_pdf:
             errors.append(f"Carrier '{carrier['name']}' needs at least one PDF uploaded")
 
@@ -164,7 +165,8 @@ def _add_carrier_callback() -> None:
             "name": "",
             "home_pdf": None,
             "auto_pdf": None,
-            "umbrella_pdf": None
+            "umbrella_pdf": None,
+            "combined_pdf": None,
         })
 
 
@@ -366,8 +368,8 @@ def _render_carrier_uploads() -> None:
     # Initialize with minimum 2 carriers
     if not st.session_state.carriers or len(st.session_state.carriers) < 2:
         st.session_state.carriers = [
-            {"name": "", "home_pdf": None, "auto_pdf": None, "umbrella_pdf": None},
-            {"name": "", "home_pdf": None, "auto_pdf": None, "umbrella_pdf": None},
+            {"name": "", "home_pdf": None, "auto_pdf": None, "umbrella_pdf": None, "combined_pdf": None},
+            {"name": "", "home_pdf": None, "auto_pdf": None, "umbrella_pdf": None, "combined_pdf": None},
         ]
 
     # Render each carrier
@@ -403,20 +405,46 @@ def _render_carrier_uploads() -> None:
 
             # File uploaders (only for selected sections)
             sections = st.session_state.sections_included
+            cname = st.session_state.carriers[i].get("name", "").strip()
+            combined_sections = get_combined_sections(cname) if cname else None
+
             if sections:
-                upload_cols = st.columns(len(sections))
-                for j, section in enumerate(sections):
-                    with upload_cols[j]:
-                        uploaded_file = st.file_uploader(
-                            f"{section.title()} PDF",
-                            type=["pdf"],
-                            key=f"carrier_{i}_{section}_pdf",
-                            label_visibility="visible"
-                        )
-                        # Store file in carrier dict
-                        st.session_state.carriers[i][f"{section}_pdf"] = uploaded_file
+                # Build list of (storage_key, label) pairs for uploaders
+                uploaders: list[tuple[str, str]] = []
+
+                if combined_sections:
+                    # Which combined sections are in scope?
+                    combined_in_scope = [s for s in combined_sections if s in sections]
+                    standalone = [s for s in sections if s not in combined_sections]
+
+                    if len(combined_in_scope) > 1:
+                        # Single uploader for the combined types
+                        combined_label = " + ".join(s.title() for s in combined_in_scope)
+                        uploaders.append(("combined", f"{combined_label} PDF (Combined)"))
+                    else:
+                        # Only 0-1 of the combined types selected — treat as standalone
+                        standalone = combined_in_scope + standalone
+
+                    for s in standalone:
+                        uploaders.append((s, f"{s.title()} PDF"))
+                else:
+                    # Non-combined carrier — one uploader per section
+                    for s in sections:
+                        uploaders.append((s, f"{s.title()} PDF"))
+
+                if uploaders:
+                    upload_cols = st.columns(len(uploaders))
+                    for j, (upload_key, label) in enumerate(uploaders):
+                        with upload_cols[j]:
+                            uploaded_file = st.file_uploader(
+                                label,
+                                type=["pdf"],
+                                key=f"carrier_{i}_{upload_key}_pdf",
+                                label_visibility="visible"
+                            )
+                            st.session_state.carriers[i][f"{upload_key}_pdf"] = uploaded_file
             else:
-                st.info("👆 Select at least one policy section above to upload quotes")
+                st.info("Select at least one policy section above to upload quotes")
 
     # Add carrier button (max 6)
     if len(st.session_state.carriers) < 6:
@@ -484,11 +512,24 @@ def render_upload_stage() -> None:
             ]
 
             # Count total PDFs for progress tracking
-            total_pdfs = sum(
-                1 for c in named_carriers
-                for s in st.session_state.sections_included
-                if c.get(f"{s}_pdf") is not None
-            )
+            total_pdfs = 0
+            for c in named_carriers:
+                c_name = c.get("name", "").strip()
+                c_combined = get_combined_sections(c_name) if c_name else None
+                if c.get("combined_pdf") is not None and c_combined:
+                    c_in_scope = [s for s in c_combined if s in st.session_state.sections_included]
+                    if len(c_in_scope) > 1:
+                        total_pdfs += 1  # One combined PDF
+                        # Count non-combined section PDFs
+                        for s in st.session_state.sections_included:
+                            if s not in c_combined and c.get(f"{s}_pdf") is not None:
+                                total_pdfs += 1
+                        continue
+                # Non-combined: count each section PDF
+                total_pdfs += sum(
+                    1 for s in st.session_state.sections_included
+                    if c.get(f"{s}_pdf") is not None
+                )
 
             # Create progress tracking widgets
             progress_bar = st.progress(0.0, text="Starting extraction...")
@@ -501,30 +542,95 @@ def render_upload_stage() -> None:
                 home_quote = None
                 auto_quote = None
                 umbrella_quote = None
+                carrier_name = carrier_dict["name"]
+                combined = get_combined_sections(carrier_name)
 
                 with status_container:
-                    st.write(f"**Processing {carrier_dict['name']}...**")
+                    st.write(f"**Processing {carrier_name}...**")
 
+                # --- Handle combined PDF if present ---
+                combined_pdf = carrier_dict.get("combined_pdf")
+                combined_handled_sections: list[str] = []
+
+                if combined_pdf is not None and combined:
+                    combined_in_scope = [s for s in combined if s in st.session_state.sections_included]
+                    if len(combined_in_scope) > 1:
+                        pdf_count += 1
+                        if total_pdfs > 0:
+                            progress_bar.progress(
+                                pdf_count / total_pdfs,
+                                text=f"Extracting {pdf_count}/{total_pdfs}: {carrier_name} - Combined"
+                            )
+
+                        combined_label = " + ".join(s.title() for s in combined_in_scope)
+                        with status_container:
+                            st.write(f"  → Extracting combined {combined_label} quote...")
+
+                        multi_result = extract_and_validate_multi(
+                            combined_pdf.read(),
+                            combined_pdf.name,
+                            carrier_name=carrier_name,
+                            expected_policy_types=combined_in_scope,
+                        )
+
+                        if multi_result.success:
+                            for quote in multi_result.quotes:
+                                section = classify_policy_type(quote.policy_type)
+                                if section == "home":
+                                    home_quote = quote
+                                elif section == "auto":
+                                    auto_quote = quote
+                                elif section == "umbrella":
+                                    umbrella_quote = quote
+                                else:
+                                    all_warnings.append(
+                                        f"**{carrier_name}**: Unrecognized policy type "
+                                        f"'{quote.policy_type}' in combined PDF"
+                                    )
+
+                            if multi_result.warnings:
+                                for w in multi_result.warnings:
+                                    all_warnings.append(f"**{carrier_name}** (combined): {w}")
+
+                            with status_container:
+                                st.write(
+                                    f"    ✅ Extracted {len(multi_result.quotes)} "
+                                    f"quotes from combined PDF"
+                                )
+                        else:
+                            error_msg = multi_result.error or "Multi-extraction failed"
+                            all_warnings.append(f"❌ **{carrier_name}** (combined): {error_msg}")
+                            with status_container:
+                                st.write(f"    ⚠️ Failed: {error_msg}")
+
+                        combined_handled_sections = combined_in_scope
+
+                # --- Handle individual section PDFs ---
                 for section in st.session_state.sections_included:
+                    # Skip sections already handled by combined extraction
+                    if section in combined_handled_sections:
+                        continue
+
                     pdf_file = carrier_dict.get(f"{section}_pdf")
                     if pdf_file is None:
                         continue
 
                     pdf_count += 1
-                    progress_pct = pdf_count / total_pdfs
-                    progress_bar.progress(
-                        progress_pct,
-                        text=f"Extracting {pdf_count}/{total_pdfs}: {carrier_dict['name']} - {section.title()}"
-                    )
+                    if total_pdfs > 0:
+                        progress_bar.progress(
+                            pdf_count / total_pdfs,
+                            text=f"Extracting {pdf_count}/{total_pdfs}: {carrier_name} - {section.title()}"
+                        )
 
                     with status_container:
                         st.write(f"  → Extracting {section.title()} quote...")
 
-                    # Call extraction API
-                    result = extract_and_validate(pdf_file.read(), pdf_file.name)
+                    # Call extraction API with carrier name for hints
+                    result = extract_and_validate(
+                        pdf_file.read(), pdf_file.name, carrier_name=carrier_name
+                    )
 
                     if result.success and result.quote:
-                        # Store quote in appropriate slot
                         if section == "home":
                             home_quote = result.quote
                         elif section == "auto":
@@ -532,23 +638,21 @@ def render_upload_stage() -> None:
                         elif section == "umbrella":
                             umbrella_quote = result.quote
 
-                        # Collect warnings
                         if result.warnings:
                             for w in result.warnings:
-                                all_warnings.append(f"**{carrier_dict['name']}** ({section}): {w}")
+                                all_warnings.append(f"**{carrier_name}** ({section}): {w}")
 
                         with status_container:
                             st.write(f"    ✅ Success (confidence: {result.quote.confidence})")
                     else:
-                        # Extraction failed - log as warning
                         error_msg = result.error or "Extraction failed"
-                        all_warnings.append(f"❌ **{carrier_dict['name']}** ({section}): {error_msg}")
+                        all_warnings.append(f"❌ **{carrier_name}** ({section}): {error_msg}")
                         with status_container:
                             st.write(f"    ⚠️ Failed: {error_msg}")
 
                 # Build carrier bundle (even if some quotes failed)
                 bundle = CarrierBundle(
-                    carrier_name=carrier_dict["name"],
+                    carrier_name=carrier_name,
                     home=home_quote,
                     auto=auto_quote,
                     umbrella=umbrella_quote,

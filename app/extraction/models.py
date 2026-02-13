@@ -49,6 +49,23 @@ class QuoteExtractionResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class MultiQuoteResponse(BaseModel):
+    """Wrapper for multi-quote Gemini extraction from combined PDFs."""
+    quotes: list[InsuranceQuote] = Field(
+        description="List of insurance quotes extracted from a single combined PDF document. "
+        "Each quote represents a different policy type (e.g., HO3, Auto, Umbrella)."
+    )
+
+
+class MultiQuoteExtractionResult(BaseModel):
+    """Result wrapper for combined PDF extraction returning multiple quotes."""
+    filename: str
+    success: bool
+    quotes: list[InsuranceQuote] = Field(default_factory=list)
+    error: Optional[str] = None
+    warnings: list[str] = Field(default_factory=list)
+
+
 class CarrierBundle(BaseModel):
     """All quotes from a single carrier for one customer comparison."""
     carrier_name: str = Field(description="Carrier name for column header")

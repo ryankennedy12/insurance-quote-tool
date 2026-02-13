@@ -1067,3 +1067,100 @@ Full Streamlit wizard is working end-to-end: Upload → Extract → Review & Edi
 **Verification:**
 - `python -m pytest tests/ -v` — 18 passed
 - All three fixes are presentation-only; no business logic changed
+
+---
+
+## Phase 9: Combined-Carrier Multi-Quote Extraction (2026-02-13)
+
+### Step 22: Combined-PDF Multi-Quote Extraction — COMPLETE
+
+**Problem:** Some carriers combine multiple policy types into a single quote PDF instead of providing separate documents per policy type:
+- **Grange:** Home + Umbrella in one PDF
+- **Hanover:** Home + Auto in one PDF
+
+The extraction pipeline previously assumed one PDF = one InsuranceQuote. The carrier-specific hints system (`get_carrier_hints()`) was also defined but never called — all extractions used default hints.
+
+**New files (2):**
+- `app/extraction/carrier_config.py` — Combined carrier configuration and lookup helpers
+- `tests/test_combined_extraction.py` — 48 unit tests
+
+**Modified files (3):**
+- `app/extraction/models.py` — Two new Pydantic models
+- `app/extraction/ai_extractor.py` — Multi-quote extraction pipeline + carrier hints bug fix
+- `app/ui/streamlit_app.py` — Combined uploader UI + multi-extraction routing
+
+**`app/extraction/carrier_config.py` (new):**
+- `COMBINED_CARRIERS` dict: maps carrier name patterns to combined policy types (`"grange": ["home", "umbrella"]`, `"hanover": ["home", "auto"]`)
+- `get_combined_sections(carrier_name)` — Case-insensitive substring match, returns combined section list or None
+- `is_combined_carrier(carrier_name)` — Convenience boolean wrapper
+- `classify_policy_type(policy_type)` — Fuzzy substring matching maps Gemini's `policy_type` string to CarrierBundle slot name. Handles 15+ variations: HO3, HO-3, HO5, Homeowners, Dwelling, DP3, Personal Auto, Automobile, Motor Vehicle, Personal Umbrella, Excess Liability, PUP, etc.
+
+**`app/extraction/models.py` — two new models:**
+- `MultiQuoteResponse` — Wrapper for Gemini multi-quote structured output: `quotes: list[InsuranceQuote]`
+- `MultiQuoteExtractionResult` — Result wrapper returning multiple quotes: `filename`, `success`, `quotes: list[InsuranceQuote]`, `error`, `warnings`
+
+**`app/extraction/ai_extractor.py` — major changes:**
+
+*Bug fix — carrier hints now actually used:*
+- `extract_quote_data()` and `extract_and_validate()` now accept optional `carrier_name` parameter (backward compatible, defaults to `""`)
+- When `carrier_name` is provided, `get_carrier_hints()` selects the matching hint entry (was previously dead code — line 289 always used `CARRIER_HINTS["default"]`)
+- All single-quote extractions from the UI now pass `carrier_name` for carrier-specific prompt hints
+
+*New carrier hints:*
+- Updated Grange entry with combined-document instructions ("Grange often combines Home and Umbrella policies in a single PDF document")
+- Added Hanover entry ("Hanover combines Home and Auto coverage into ONE document")
+
+*Multi-quote extraction pipeline:*
+- `MULTI_QUOTE_ADDENDUM` — Prompt addendum instructing Gemini to extract each policy as a separate quote object, with expected policy types listed
+- `_call_gemini_text_multi(text, system_prompt) -> list[InsuranceQuote]` — Text path using `MultiQuoteResponse` schema
+- `_call_gemini_multimodal_multi(pdf_bytes, system_prompt) -> list[InsuranceQuote]` — Multimodal path for scanned docs
+- `_parse_multi_response(response)` — Handles dict/list parsed responses from Gemini structured output
+- `_parse_multi_response_text(response_text)` — Text fallback with json-repair for when structured output fails. Handles three formats: `{"quotes": [...]}` wrapper, bare `[...]` list, and single object fallback
+- `extract_multi_quote_data(pdf_bytes, filename, carrier_name, expected_policy_types) -> list[InsuranceQuote]` — Public API for multi-quote extraction
+- `extract_and_validate_multi(pdf_bytes, filename, carrier_name, expected_policy_types) -> MultiQuoteExtractionResult` — Full pipeline with validation. If Gemini returns fewer quotes than expected, logs a warning and adds a user-visible warning but does **not** fail — returns whatever was successfully extracted
+
+**`app/ui/streamlit_app.py` — UI changes:**
+
+*Upload stage:*
+- Carrier dict initialization updated with `"combined_pdf": None` key
+- `_render_carrier_uploads()`: When carrier name matches a combined carrier and both combined sections are selected, replaces separate per-section uploaders with a single uploader labeled e.g. "Home + Umbrella PDF (Combined)". Non-combined sections remain as separate uploaders. Falls back to normal behavior if only one of the combined types is selected.
+- `_validate_upload_stage()`: "Has at least one PDF" check now includes `combined_pdf`
+
+*Extraction loop:*
+- `total_pdfs` count accounts for combined PDFs counting as 1 instead of per-section
+- Per-carrier extraction: checks for `combined_pdf` first. If present and carrier is combined, calls `extract_and_validate_multi()` with carrier_name and expected_policy_types. Distributes results using `classify_policy_type(quote.policy_type)` into home_quote/auto_quote/umbrella_quote slots. Then processes remaining non-combined section PDFs normally.
+- All single-quote `extract_and_validate()` calls now pass `carrier_name` for carrier-specific hints
+
+**Data flow (combined carrier):**
+```
+UI: User types "Grange Insurance", selects Home + Umbrella
+UI: Single "Home + Umbrella PDF (Combined)" uploader appears
+UI: User uploads one PDF → stored as carriers[i]["combined_pdf"]
+
+Extraction:
+  1. extract_and_validate_multi(pdf_bytes, filename, "Grange Insurance", ["home", "umbrella"])
+  2. Gemini prompt = SYSTEM_PROMPT (Grange hints) + MULTI_QUOTE_ADDENDUM
+  3. Schema = MultiQuoteResponse { quotes: list[InsuranceQuote] }
+  4. Returns 2 InsuranceQuotes: one HO3, one Umbrella
+  5. classify_policy_type("HO3") → "home", classify_policy_type("Umbrella") → "umbrella"
+  6. CarrierBundle(home=quote1, umbrella=quote2)
+
+Review/Export: unchanged — CarrierBundle identical regardless of source
+```
+
+**Test coverage (`tests/test_combined_extraction.py` — 48 tests):**
+- `TestGetCombinedSections` (7): Grange, Hanover, case insensitivity, unknown, empty, whitespace
+- `TestIsCombinedCarrier` (4): Grange, Hanover, Erie (false), State Farm (false)
+- `TestClassifyPolicyType` (22): HO3, HO5, HO-3, HO-5, Homeowners, Dwelling/DP3, Auto, Personal Auto, Automobile, Car, Vehicle, Motor, Umbrella, Personal Umbrella, Excess Liability, PUP, BOP→None, empty→None, Commercial→None
+- `TestMultiQuoteResponse` (3): Two quotes, empty, single
+- `TestMultiQuoteExtractionResult` (2): Success and failure
+- `TestCarrierHintsUsed` (3): Grange hints in prompt, default without carrier, Hanover hints
+- `TestMultiQuotePrompt` (1): Addendum present with expected types
+- `TestParseMultiResponseText` (3): Wrapper format, bare list, single object fallback
+- `TestExtractAndValidateMultiFallback` (2): Fewer-than-expected warns but succeeds, exact count no extra warning
+- `TestCombinedCarriersExtensible` (1): Dict is mutable for future carriers
+
+**Verification:**
+- `python -m pytest tests/ -v` — 66 passed (48 new + 18 existing)
+- Import test: `from app.extraction.carrier_config import ...; from app.extraction.ai_extractor import extract_and_validate_multi, ...` — All imports OK
+- No changes to: `validator.py`, `pdf_gen/`, `sheets/`, `config.py`

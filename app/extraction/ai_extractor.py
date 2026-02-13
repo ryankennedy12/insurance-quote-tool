@@ -8,7 +8,12 @@ from google import genai
 from google.genai import types
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from app.extraction.models import InsuranceQuote, QuoteExtractionResult
+from app.extraction.models import (
+    InsuranceQuote,
+    MultiQuoteExtractionResult,
+    MultiQuoteResponse,
+    QuoteExtractionResult,
+)
 from app.extraction.pdf_parser import extract_text_from_pdf
 from app.utils.config import GEMINI_API_KEY
 
@@ -126,6 +131,18 @@ GRANGE INSURANCE specifics:
 - Premium is under "Total Annual Premium"
 - Grange uses "Grange Mutual" or "Grange Insurance" — normalize to "Grange Insurance"
 - Look for "GrangeGold" or "GrangeClassic" to determine HO3 vs HO5
+- IMPORTANT: Grange often combines Home and Umbrella policies in a single PDF document
+- Extract Home and Umbrella as SEPARATE quotes with their own premiums
+- The umbrella section may appear as "Personal Umbrella Policy" or "Excess Liability"
+""",
+    "hanover": """
+HANOVER INSURANCE specifics:
+- The Hanover Insurance Group, common in Ohio market
+- IMPORTANT: Hanover combines Home and Auto coverage into ONE document
+- Extract Home and Auto as SEPARATE quotes with their own premiums
+- Home coverage follows standard A/B/C/D/E/F convention
+- Auto section lists BI/PD limits and deductibles separately
+- Look for individual policy type premium amounts, not just a package total
 """,
     "default": """
 No carrier-specific hints available for this carrier. Use standard extraction rules.
@@ -135,6 +152,24 @@ Pay special attention to:
 - Any carrier-specific endorsement names
 """,
 }
+
+
+MULTI_QUOTE_ADDENDUM = """\
+
+CRITICAL: This document contains MULTIPLE policy types combined into a single PDF.
+You MUST extract EACH policy as a SEPARATE quote object in the quotes array.
+
+Expected policy types in this document: {expected_types}
+
+For EACH policy type found:
+- Create a separate InsuranceQuote object with the correct policy_type
+- Extract the premium specific to THAT policy (not the combined/package total)
+- Extract coverage limits relevant to that policy type only
+- If a premium or coverage value applies to the bundle as a whole, note this in the notes field
+
+Do NOT combine multiple policies into a single quote object.
+Do NOT skip any policy type that is present in the document.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +222,47 @@ def _parse_response(response_text: str) -> InsuranceQuote:
             ) from exc
 
     return InsuranceQuote.model_validate(data)
+
+
+def _parse_multi_response_text(response_text: str) -> list[InsuranceQuote]:
+    """Parse Gemini JSON response into list of InsuranceQuote, with json-repair fallback."""
+    try:
+        raw = json.loads(response_text)
+    except json.JSONDecodeError:
+        logger.warning("Multi-quote JSON parse failed, attempting json-repair...")
+        repaired = json_repair.repair_json(response_text)
+        try:
+            raw = json.loads(repaired)
+        except json.JSONDecodeError as exc:
+            snippet = response_text[:200]
+            raise ValueError(
+                f"Multi-quote JSON parse failed even after repair. Raw: {snippet}"
+            ) from exc
+
+    if isinstance(raw, dict) and "quotes" in raw:
+        wrapper = MultiQuoteResponse.model_validate(raw)
+        return wrapper.quotes
+    elif isinstance(raw, list):
+        return [InsuranceQuote.model_validate(q) for q in raw]
+    else:
+        # Attempt single-quote fallback
+        return [InsuranceQuote.model_validate(raw)]
+
+
+def _parse_multi_response(response: object) -> list[InsuranceQuote]:
+    """Extract list of InsuranceQuote from a Gemini response object."""
+    if response.parsed is not None:
+        data = response.parsed
+        if isinstance(data, dict):
+            wrapper = MultiQuoteResponse.model_validate(data)
+            return wrapper.quotes
+        if isinstance(data, list):
+            return [
+                InsuranceQuote.model_validate(q) if isinstance(q, dict) else q
+                for q in data
+            ]
+    # Fall back to text parsing (handles structured output failures)
+    return _parse_multi_response_text(response.text)
 
 
 # ---------------------------------------------------------------------------
@@ -275,18 +351,108 @@ def _call_gemini_multimodal(pdf_bytes: bytes, system_prompt: str) -> InsuranceQu
 
 
 # ---------------------------------------------------------------------------
+# Multi-quote Gemini API calls (combined-carrier PDFs)
+# ---------------------------------------------------------------------------
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+def _call_gemini_text_multi(text: str, system_prompt: str) -> list[InsuranceQuote]:
+    """Send text to Gemini for multi-quote structured extraction."""
+    clean_schema = _clean_schema_for_gemini(
+        MultiQuoteResponse.model_json_schema()
+    )
+    config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        response_mime_type="application/json",
+        response_schema=clean_schema,
+        temperature=0,
+    )
+
+    response = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=(
+            "Extract ALL insurance quotes from this document. "
+            "This document contains multiple policy types.\n\n" + text
+        ),
+        config=config,
+    )
+
+    return _parse_multi_response(response)
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+def _call_gemini_multimodal_multi(
+    pdf_bytes: bytes, system_prompt: str
+) -> list[InsuranceQuote]:
+    """Send raw PDF to Gemini for multi-quote multimodal extraction."""
+    clean_schema = _clean_schema_for_gemini(
+        MultiQuoteResponse.model_json_schema()
+    )
+    config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        response_mime_type="application/json",
+        response_schema=clean_schema,
+        temperature=0,
+    )
+
+    tmp_fd = None
+    tmp_path: str | None = None
+    try:
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
+        os.write(tmp_fd, pdf_bytes)
+        os.close(tmp_fd)
+        tmp_fd = None
+
+        uploaded_file = client.files.upload(file=tmp_path)
+
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[
+                "Extract ALL insurance quotes from this PDF document. "
+                "This document contains multiple policy types.",
+                types.Part(
+                    file_data=types.FileData(
+                        file_uri=uploaded_file.uri,
+                        mime_type="application/pdf",
+                    )
+                ),
+            ],
+            config=config,
+        )
+    finally:
+        if tmp_fd is not None:
+            try:
+                os.close(tmp_fd)
+            except OSError:
+                pass
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+    return _parse_multi_response(response)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
-def extract_quote_data(pdf_bytes: bytes, filename: str = "") -> InsuranceQuote:
+def extract_quote_data(
+    pdf_bytes: bytes, filename: str = "", carrier_name: str = "",
+) -> InsuranceQuote:
     """Extract structured quote data from PDF bytes via Gemini.
 
     Uses text path for digital PDFs, multimodal path for scanned PDFs.
     Retries up to 3 times with exponential backoff on API errors.
+
+    Args:
+        pdf_bytes: Raw PDF file bytes.
+        filename: Original filename for logging.
+        carrier_name: Optional carrier name for carrier-specific hints.
     """
     text, is_digital = extract_text_from_pdf(pdf_bytes)
-    system_prompt = SYSTEM_PROMPT.replace("{carrier_hints}", CARRIER_HINTS["default"])
+
+    hints = get_carrier_hints(carrier_name) if carrier_name else CARRIER_HINTS["default"]
+    system_prompt = SYSTEM_PROMPT.replace("{carrier_hints}", hints)
 
     if is_digital and text:
         logger.info("Using text extraction path for %s", filename or "unknown")
@@ -306,12 +472,56 @@ def extract_quote_data(pdf_bytes: bytes, filename: str = "") -> InsuranceQuote:
     return quote
 
 
-def extract_and_validate(pdf_bytes: bytes, filename: str) -> QuoteExtractionResult:
-    """Full extraction pipeline: extract → validate → return result."""
+def extract_multi_quote_data(
+    pdf_bytes: bytes,
+    filename: str = "",
+    carrier_name: str = "",
+    expected_policy_types: list[str] | None = None,
+) -> list[InsuranceQuote]:
+    """Extract multiple quotes from a combined-carrier PDF.
+
+    Args:
+        pdf_bytes: Raw PDF file bytes.
+        filename: Original filename for logging.
+        carrier_name: Carrier name for hints lookup.
+        expected_policy_types: Expected types e.g. ["home", "umbrella"].
+
+    Returns:
+        List of InsuranceQuote objects, one per policy type found.
+    """
+    text, is_digital = extract_text_from_pdf(pdf_bytes)
+
+    hints = get_carrier_hints(carrier_name) if carrier_name else CARRIER_HINTS["default"]
+    expected_str = ", ".join(t.title() for t in (expected_policy_types or []))
+    addendum = MULTI_QUOTE_ADDENDUM.replace("{expected_types}", expected_str)
+    system_prompt = SYSTEM_PROMPT.replace("{carrier_hints}", hints) + addendum
+
+    if is_digital and text:
+        logger.info("Multi-quote text extraction for %s", filename or "unknown")
+        quotes = _call_gemini_text_multi(text, system_prompt)
+        raw_source = "text"
+    else:
+        logger.info("Multi-quote multimodal extraction for %s", filename or "unknown")
+        quotes = _call_gemini_multimodal_multi(pdf_bytes, system_prompt)
+        raw_source = "multimodal"
+
+    quotes = [q.model_copy(update={"raw_source": raw_source}) for q in quotes]
+
+    logger.info(
+        "Multi-extraction complete: %d quotes from %s (carrier=%s)",
+        len(quotes), filename or "unknown", carrier_name,
+    )
+    return quotes
+
+
+def extract_and_validate(
+    pdf_bytes: bytes, filename: str, carrier_name: str = "",
+) -> QuoteExtractionResult:
+    """Full extraction pipeline: extract -> validate -> return result."""
     from app.extraction.validator import validate_quote
 
     try:
-        quote = extract_quote_data(pdf_bytes, filename)
+        quote = extract_quote_data(pdf_bytes, filename, carrier_name)
         quote, warnings = validate_quote(quote)
         return QuoteExtractionResult(
             filename=filename,
@@ -322,6 +532,66 @@ def extract_and_validate(pdf_bytes: bytes, filename: str) -> QuoteExtractionResu
     except Exception as exc:
         logger.error("Extraction failed for %s: %s", filename, exc)
         return QuoteExtractionResult(
+            filename=filename,
+            success=False,
+            error=str(exc),
+        )
+
+
+def extract_and_validate_multi(
+    pdf_bytes: bytes,
+    filename: str,
+    carrier_name: str = "",
+    expected_policy_types: list[str] | None = None,
+) -> MultiQuoteExtractionResult:
+    """Full multi-quote extraction pipeline for combined-carrier PDFs.
+
+    If Gemini returns fewer quotes than expected, logs a warning but does
+    not fail — returns whatever was successfully extracted.
+    """
+    from app.extraction.validator import validate_quote
+
+    try:
+        quotes = extract_multi_quote_data(
+            pdf_bytes, filename, carrier_name, expected_policy_types,
+        )
+
+        # Warn if fewer quotes than expected, but don't fail
+        if expected_policy_types and len(quotes) < len(expected_policy_types):
+            logger.warning(
+                "Expected %d policy types (%s) but extracted %d from %s",
+                len(expected_policy_types),
+                ", ".join(expected_policy_types),
+                len(quotes),
+                filename,
+            )
+
+        validated_quotes: list[InsuranceQuote] = []
+        all_warnings: list[str] = []
+
+        # Warn about count mismatch in user-visible warnings too
+        if expected_policy_types and len(quotes) < len(expected_policy_types):
+            all_warnings.append(
+                f"Expected {len(expected_policy_types)} policy types "
+                f"({', '.join(t.title() for t in expected_policy_types)}) "
+                f"but only extracted {len(quotes)} from the combined PDF. "
+                f"You may need to enter missing data manually in the review stage."
+            )
+
+        for quote in quotes:
+            validated, warnings = validate_quote(quote)
+            validated_quotes.append(validated)
+            all_warnings.extend(warnings)
+
+        return MultiQuoteExtractionResult(
+            filename=filename,
+            success=True,
+            quotes=validated_quotes,
+            warnings=all_warnings,
+        )
+    except Exception as exc:
+        logger.error("Multi-extraction failed for %s: %s", filename, exc)
+        return MultiQuoteExtractionResult(
             filename=filename,
             success=False,
             error=str(exc),
