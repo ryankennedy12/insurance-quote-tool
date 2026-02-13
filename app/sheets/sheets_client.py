@@ -646,7 +646,7 @@ class SheetsClient:
         grid.append(["", session.date] + [""] * max(0, num_data_cols - 1))
 
         # Row 3: Carrier names header
-        carrier_header: list[Any] = [""]
+        carrier_header: list[Any] = ["Premium Breakout"]
         if session.current_policy:
             current_name = session.current_policy.carrier_name or "Current"
             carrier_header.append(f"Current: {current_name}")
@@ -815,21 +815,14 @@ class SheetsClient:
                 "format": {"backgroundColor": LIGHT_GRAY_BG},
             })
 
-        # --- Current Policy column: cream background (applied AFTER gray
-        #     so it overrides alternating shading for column B) ---
+        # --- Current Policy column: cream background on data rows only
+        #     (skip section headers so maroon applies uniformly) ---
         if has_current_policy:
-            formats.append({
-                "range": "B4:B25",
-                "format": {"backgroundColor": CURRENT_COL_BG},
-            })
-            # Dark cream + bold header for "Current: {name}" (overrides maroon on B3)
-            formats.append({
-                "range": "B3",
-                "format": {
-                    "backgroundColor": CURRENT_HEADER_BG,
-                    "textFormat": {"bold": True},
-                },
-            })
+            for rng in ("B4:B7", "B10:B15", "B18:B21", "B24:B25"):
+                formats.append({
+                    "range": rng,
+                    "format": {"backgroundColor": CURRENT_COL_BG},
+                })
 
         # --- Thin borders (A3 through last_col:25) ---
         thin_border = {
@@ -926,6 +919,19 @@ class SheetsClient:
                         "endColumnIndex": 1 + num_data_cols,
                     },
                     "mergeType": "MERGE_ALL",
+                },
+            },
+            # Row 1-2 heights (taller for logo visibility)
+            {
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "ROWS",
+                        "startIndex": 0,
+                        "endIndex": 2,
+                    },
+                    "properties": {"pixelSize": 45},
+                    "fields": "pixelSize",
                 },
             },
         ]

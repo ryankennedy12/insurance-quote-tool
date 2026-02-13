@@ -813,4 +813,102 @@ Create a desktop shortcut pointing to `run.bat`.
 
 Full Streamlit wizard is working end-to-end: Upload → Extract → Review & Edit → Export (PDF + Google Sheets).
 
-**Pending:** Google Sheets export currently requires a pre-existing "Template" worksheet. Next task is a template-free rewrite of `sheets_client.py` to build sheets programmatically with formatting via `gspread` batch API. See `docs/SHEETS_REWRITE_PLAN.md` for the full plan.
+**Pending:** ~~Google Sheets export currently requires a pre-existing "Template" worksheet. Next task is a template-free rewrite of `sheets_client.py` to build sheets programmatically with formatting via `gspread` batch API. See `docs/SHEETS_REWRITE_PLAN.md` for the full plan.~~ **Done — see Phase 6 below.**
+
+---
+
+## Phase 6: Google Sheets Rewrite (2026-02-12)
+
+### Step 16: Template-Free Programmatic Sheets — COMPLETE
+
+**Plan:** `docs/SHEETS_REWRITE_PLAN.md`
+
+**Modified files:**
+- `app/sheets/sheets_client.py` — Full rewrite per plan
+- `app/utils/config.py` — Added `LOGO_DRIVE_FILE_ID` env var
+- `scripts/test_sheets_live.py` — Live smoke test script (new file)
+
+**What was removed:**
+- `TemplateNotFoundError` exception class (no template = no template error)
+- `WorksheetNotFound` import (no longer caught)
+- `_duplicate_template()` method — replaced by `_create_worksheet()`
+- `_build_data_grid()` method — replaced by `_build_full_grid()`
+- Template dependency: no more "Template" worksheet prerequisite
+
+**What was added:**
+
+**Module-level formatting constants:**
+- `MAROON_BG` — `{"red": 0.529, "green": 0.110, "blue": 0.188}` (RGB 135,28,48 / #871c30)
+- `WHITE_TEXT` — `{"red": 1.0, "green": 1.0, "blue": 1.0}`
+- `LIGHT_GRAY_BG` — `{"red": 0.973, "green": 0.973, "blue": 0.973}` (#f8f8f8)
+- `CURRENT_COL_BG` — `{"red": 1.0, "green": 0.973, "blue": 0.941}` (#FFF8F0 light cream)
+- `CURRENT_HEADER_BG` — `{"red": 0.961, "green": 0.902, "blue": 0.827}` (#F5E6D3 dark cream)
+- `ROW_LABELS` — 25-element list of column A labels (index 0 = row 1)
+- `HEADER_ROWS` — `[1, 3, 9, 17, 23]` (maroon background rows)
+- `CURRENCY_ROWS` — `[4, 5, 6, 7, 10, 11, 12, 13, 14, 15]` (premium + home coverage rows)
+- `LABEL_COL_WIDTH` = 140, `DATA_COL_WIDTH` = 120
+
+**New methods:**
+- `_get_num_data_columns(session)` — Returns `len(carriers[:6]) + (1 if current_policy else 0)`
+- `_create_worksheet(client_name, date, num_data_cols)` — Creates blank worksheet via `add_worksheet(title, rows=25, cols=1+num_data_cols)` with same `_2`/`_3` dedup naming
+- `_build_full_grid(session, num_data_cols)` — Builds all 25 rows at A1: row 1 title, row 2 date, row 3 carrier names, rows 4-25 labels + data from existing helpers. Inner `pad_row()` trims helper rows to actual column count; strips current policy column when absent
+- `_apply_formatting(worksheet, num_data_cols, *, has_current_policy)` — Single `batch_format()` call (one API request) for all cell formatting + `spreadsheet.batch_update()` (one API request) for column widths and merges
+
+**Formatting applied by `_apply_formatting()`:**
+
+| Rule | Range | Format |
+|------|-------|--------|
+| Maroon headers | Rows 1 (B1+), 3, 9, 17, 23 | Maroon BG #871c30, white bold text, centered |
+| Bold total | Row 7 | Bold |
+| Currency | Rows 4-7, 10-15 (B through last col) | `"$"#,##0` |
+| Alternating shading | Even data rows (4,6,10,12,14,18,20,24) | Light gray #f8f8f8 BG |
+| Current Policy column | B4:B25 | Cream #FFF8F0 BG (overrides gray) |
+| Current Policy header | B3 | Dark cream #F5E6D3 BG, bold (overrides maroon) |
+| Borders | A3 through last-col:25 | Thin solid all sides |
+| Data alignment | B4 through last-col:25 | Center |
+| Label alignment | A4:A25 | Left |
+| Date row | B2 through last-col:2 | Italic, left |
+| Column A width | Col A | 140px |
+| Data column widths | B through last | 120px |
+| Logo cell merge | A1:A2 | Merged for logo placeholder |
+| Title merge | B1 through last-col:1 | Merged for title text |
+
+**Logo support:**
+- Title moved from A1 to B1; date moved from A2 to B2
+- A1:A2 merged vertically as logo placeholder
+- If `LOGO_DRIVE_FILE_ID` env var is set, writes `=IMAGE("https://drive.google.com/uc?id={ID}", 2)` into A1
+- Google Sheets REST API has no `addImage`/`insertImage` request type — `=IMAGE()` formula with public Google Drive URL is the only programmatic option from gspread/Python
+- Setup: Upload logo to Google Drive, share as "Anyone with the link", set `LOGO_DRIVE_FILE_ID` in `.env`
+
+**Modified methods:**
+- `_write_to_worksheet()` — Writes at `A1` instead of `B4`
+- `create_comparison()` — New flow: `_create_worksheet` → `_build_full_grid` → `_write_to_worksheet` → `_apply_formatting` → logo insert → URL. Removed `WorksheetNotFound`/`TemplateNotFoundError` catch block
+
+**Unchanged (11 helper methods):**
+`_format_cell_value`, `_get_auto_limits`, `_get_umbrella_limits`, `_build_premium_row`, `_build_total_row`, `_build_home_section`, `_build_auto_section`, `_build_umbrella_section`, `_build_coverage_row`, `_build_auto_limits_row`, `_build_umbrella_limits_row`
+
+**Config change:**
+- `app/utils/config.py` — Added `LOGO_DRIVE_FILE_ID: str = os.getenv("LOGO_DRIVE_FILE_ID", "")` under Google Sheets credentials section
+
+**Smoke test:**
+- `scripts/test_sheets_live.py` — Standalone script that creates a real worksheet with 3 fake carriers (Erie, Progressive, Nationwide) + State Farm current policy, all three sections populated. Prints the Google Sheets URL for visual verification.
+
+**Verification:**
+- `python -c "from app.sheets.sheets_client import SheetsClient; print('Import OK')"` — Pass
+- `python -c "from app.ui.streamlit_app import main; print('Streamlit import OK')"` — Pass
+- `python -m pytest tests/ -v` — No test regressions (0 collected, exit 5)
+- `python scripts/test_sheets_live.py` — Creates formatted worksheet in Google Sheets
+
+**Commits:**
+1. `feat: template-free programmatic Google Sheets with dynamic formatting`
+2. `feat: distinct current policy column color and logo support in Sheets`
+3. `feat: auto-insert logo via =IMAGE() formula from LOGO_DRIVE_FILE_ID env var`
+4. `fix: Sheets layout — logo row height, uniform maroon headers, Premium Breakout label`
+
+### Step 18: Sheets Visual Polish — COMPLETE
+
+**Changes:** `app/sheets/sheets_client.py`
+
+- **Logo row height:** Added `updateDimensionProperties` for rows 1-2, setting `pixelSize: 45` (default was ~21px). Logo now has 140×90px of space in merged A1:A2.
+- **Uniform maroon headers on current policy column:** Removed the dark cream override on B3 and replaced the blanket `B4:B25` cream range with four targeted data-only ranges (`B4:B7`, `B10:B15`, `B18:B21`, `B24:B25`). Section header rows 3, 9, 17, 23 now render maroon uniformly across all columns.
+- **"Premium Breakout" label in A3:** Changed A3 from `""` to `"Premium Breakout"` in the carrier header row, rendered as white bold text on maroon.
