@@ -69,7 +69,8 @@ class MultiQuoteExtractionResult(BaseModel):
 class CarrierBundle(BaseModel):
     """All quotes from a single carrier for one customer comparison."""
     carrier_name: str = Field(description="Carrier name for column header")
-    home: Optional[InsuranceQuote] = Field(None, description="Home/HO3/HO5 quote")
+    home: Optional[InsuranceQuote] = Field(None, description="Home/HO3/HO5 quote (Dwelling 1)")
+    home_2: Optional[InsuranceQuote] = Field(None, description="Home/HO3/HO5 quote (Dwelling 2)")
     auto: Optional[InsuranceQuote] = Field(None, description="Auto quote")
     umbrella: Optional[InsuranceQuote] = Field(None, description="Umbrella/excess liability quote")
 
@@ -79,6 +80,8 @@ class CarrierBundle(BaseModel):
         total = 0.0
         if self.home:
             total += self.home.annual_premium
+        if self.home_2:
+            total += self.home_2.annual_premium
         if self.auto:
             total += self.auto.annual_premium
         if self.umbrella:
@@ -89,7 +92,7 @@ class CarrierBundle(BaseModel):
     def policy_types_present(self) -> list[str]:
         """Which policy types have quotes."""
         types = []
-        if self.home:
+        if self.home or self.home_2:
             types.append("home")
         if self.auto:
             types.append("auto")
@@ -102,7 +105,7 @@ class CurrentPolicy(BaseModel):
     """Customer's current coverage for comparison baseline."""
     carrier_name: str = Field(description="Current carrier name")
 
-    # Home
+    # Home (Dwelling 1)
     home_premium: Optional[float] = Field(None, description="Current annual home premium")
     home_dwelling: Optional[float] = Field(None, description="Current dwelling coverage limit")
     home_other_structures: Optional[float] = Field(None, description="Current other structures limit")
@@ -110,6 +113,15 @@ class CurrentPolicy(BaseModel):
     home_personal_property: Optional[float] = Field(None, description="Current personal property limit")
     home_loss_of_use: Optional[float] = Field(None, description="Current loss of use limit")
     home_deductible: Optional[float] = Field(None, description="Current home deductible")
+
+    # Home (Dwelling 2)
+    home_2_premium: Optional[float] = Field(None, description="Dwelling 2 annual home premium")
+    home_2_dwelling: Optional[float] = Field(None, description="Dwelling 2 dwelling coverage limit")
+    home_2_other_structures: Optional[float] = Field(None, description="Dwelling 2 other structures limit")
+    home_2_liability: Optional[float] = Field(None, description="Dwelling 2 liability limit")
+    home_2_personal_property: Optional[float] = Field(None, description="Dwelling 2 personal property limit")
+    home_2_loss_of_use: Optional[float] = Field(None, description="Dwelling 2 loss of use limit")
+    home_2_deductible: Optional[float] = Field(None, description="Dwelling 2 home deductible")
 
     # Auto
     auto_premium: Optional[float] = Field(None, description="Current annual auto premium")
@@ -128,6 +140,8 @@ class CurrentPolicy(BaseModel):
         total = 0.0
         if self.home_premium:
             total += self.home_premium
+        if self.home_2_premium:
+            total += self.home_2_premium
         if self.auto_premium:
             total += self.auto_premium
         if self.umbrella_premium:

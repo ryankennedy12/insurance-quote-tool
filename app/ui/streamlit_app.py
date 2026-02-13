@@ -34,6 +34,9 @@ def init_session_state() -> None:
         "current_policy_data": None,
         "current_policy_pdf": None,
 
+        # ── Multi-Dwelling ──
+        "multiple_dwellings": False,
+
         # ── Carrier Data ──
         "carriers": [],
 
@@ -88,6 +91,15 @@ def _build_current_policy_from_form() -> CurrentPolicy:
             # "ALS" or other text → store as None (user can edit in Review stage)
             loss_of_use = None
 
+    # Dwelling 2 loss_of_use (same ALS handling)
+    loss_of_use_2_raw = st.session_state.get("cp_home_2_loss_of_use", "")
+    loss_of_use_2 = None
+    if loss_of_use_2_raw:
+        try:
+            loss_of_use_2 = float(loss_of_use_2_raw)
+        except ValueError:
+            loss_of_use_2 = None
+
     return CurrentPolicy(
         carrier_name=carrier_name,
         home_premium=clean_float("cp_home_premium"),
@@ -97,6 +109,13 @@ def _build_current_policy_from_form() -> CurrentPolicy:
         home_personal_property=clean_float("cp_home_personal_property"),
         home_loss_of_use=loss_of_use,
         home_deductible=clean_float("cp_home_deductible"),
+        home_2_premium=clean_float("cp_home_2_premium"),
+        home_2_dwelling=clean_float("cp_home_2_dwelling"),
+        home_2_other_structures=clean_float("cp_home_2_other_structures"),
+        home_2_liability=clean_float("cp_home_2_liability"),
+        home_2_personal_property=clean_float("cp_home_2_personal_property"),
+        home_2_loss_of_use=loss_of_use_2,
+        home_2_deductible=clean_float("cp_home_2_deductible"),
         auto_premium=clean_float("cp_auto_premium"),
         auto_limits=clean_str("cp_auto_limits"),
         auto_um_uim=clean_str("cp_auto_um_uim"),
@@ -151,7 +170,7 @@ def _validate_upload_stage() -> list[str]:
         has_pdf = any(
             carrier.get(f"{section}_pdf") is not None
             for section in st.session_state.sections_included
-        ) or carrier.get("combined_pdf") is not None
+        ) or carrier.get("combined_pdf") is not None or carrier.get("home_2_pdf") is not None
         if not has_pdf:
             errors.append(f"Carrier '{carrier['name']}' needs at least one PDF uploaded")
 
@@ -164,6 +183,7 @@ def _add_carrier_callback() -> None:
         st.session_state.carriers.append({
             "name": "",
             "home_pdf": None,
+            "home_2_pdf": None,
             "auto_pdf": None,
             "umbrella_pdf": None,
             "combined_pdf": None,
@@ -242,6 +262,61 @@ def _render_current_policy_manual_form() -> None:
                         min_value=0.0,
                         step=500.0,
                         key="cp_home_deductible",
+                        format="%.0f"
+                    )
+
+            # Home section - Dwelling 2
+            if "home" in sections and st.session_state.get("multiple_dwellings", False):
+                st.subheader("🏠 Home Insurance - Dwelling 2")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.number_input(
+                        "Annual Home 2 Premium ($)",
+                        min_value=0.0,
+                        step=100.0,
+                        key="cp_home_2_premium",
+                        format="%.2f"
+                    )
+                    st.number_input(
+                        "Dwelling 2 Coverage ($)",
+                        min_value=0.0,
+                        step=10000.0,
+                        key="cp_home_2_dwelling",
+                        format="%.0f"
+                    )
+                    st.number_input(
+                        "Other Structures 2 ($)",
+                        min_value=0.0,
+                        step=1000.0,
+                        key="cp_home_2_other_structures",
+                        format="%.0f"
+                    )
+                    st.number_input(
+                        "Personal Property 2 ($)",
+                        min_value=0.0,
+                        step=1000.0,
+                        key="cp_home_2_personal_property",
+                        format="%.0f"
+                    )
+                with col2:
+                    st.number_input(
+                        "Liability 2 ($)",
+                        min_value=0.0,
+                        step=50000.0,
+                        key="cp_home_2_liability",
+                        format="%.0f"
+                    )
+                    st.text_input(
+                        "Loss of Use 2",
+                        key="cp_home_2_loss_of_use",
+                        help="Dollar amount or 'ALS' for Actual Loss Sustained",
+                        placeholder="e.g., 20000 or ALS"
+                    )
+                    st.number_input(
+                        "Deductible 2 ($)",
+                        min_value=0.0,
+                        step=500.0,
+                        key="cp_home_2_deductible",
                         format="%.0f"
                     )
 
@@ -368,8 +443,8 @@ def _render_carrier_uploads() -> None:
     # Initialize with minimum 2 carriers
     if not st.session_state.carriers or len(st.session_state.carriers) < 2:
         st.session_state.carriers = [
-            {"name": "", "home_pdf": None, "auto_pdf": None, "umbrella_pdf": None, "combined_pdf": None},
-            {"name": "", "home_pdf": None, "auto_pdf": None, "umbrella_pdf": None, "combined_pdf": None},
+            {"name": "", "home_pdf": None, "home_2_pdf": None, "auto_pdf": None, "umbrella_pdf": None, "combined_pdf": None},
+            {"name": "", "home_pdf": None, "home_2_pdf": None, "auto_pdf": None, "umbrella_pdf": None, "combined_pdf": None},
         ]
 
     # Render each carrier
@@ -411,6 +486,7 @@ def _render_carrier_uploads() -> None:
             if sections:
                 # Build list of (storage_key, label) pairs for uploaders
                 uploaders: list[tuple[str, str]] = []
+                is_multi_dw = st.session_state.get("multiple_dwellings", False)
 
                 if combined_sections:
                     # Which combined sections are in scope?
@@ -418,19 +494,33 @@ def _render_carrier_uploads() -> None:
                     standalone = [s for s in sections if s not in combined_sections]
 
                     if len(combined_in_scope) > 1:
-                        # Single uploader for the combined types
+                        # Combined uploader covers Dwelling 1 for home
                         combined_label = " + ".join(s.title() for s in combined_in_scope)
-                        uploaders.append(("combined", f"{combined_label} PDF (Combined)"))
+                        if is_multi_dw:
+                            uploaders.append(("combined", f"{combined_label} PDF (Combined - Dwelling 1)"))
+                        else:
+                            uploaders.append(("combined", f"{combined_label} PDF (Combined)"))
+                        # If multi-dwelling, add separate Dwelling 2 uploader
+                        if is_multi_dw and "home" in combined_in_scope:
+                            uploaders.append(("home_2", "Home (Dwelling 2) PDF"))
                     else:
                         # Only 0-1 of the combined types selected — treat as standalone
                         standalone = combined_in_scope + standalone
 
                     for s in standalone:
-                        uploaders.append((s, f"{s.title()} PDF"))
+                        if s == "home" and is_multi_dw:
+                            uploaders.append(("home", "Home (Dwelling 1) PDF"))
+                            uploaders.append(("home_2", "Home (Dwelling 2) PDF"))
+                        else:
+                            uploaders.append((s, f"{s.title()} PDF"))
                 else:
                     # Non-combined carrier — one uploader per section
                     for s in sections:
-                        uploaders.append((s, f"{s.title()} PDF"))
+                        if s == "home" and is_multi_dw:
+                            uploaders.append(("home", "Home (Dwelling 1) PDF"))
+                            uploaders.append(("home_2", "Home (Dwelling 2) PDF"))
+                        else:
+                            uploaders.append((s, f"{s.title()} PDF"))
 
                 if uploaders:
                     upload_cols = st.columns(len(uploaders))
@@ -470,6 +560,14 @@ def render_upload_stage() -> None:
         default=["home"],
         key="sections_included"
     )
+
+    # Multiple Dwellings checkbox (only visible when home is selected)
+    if "home" in st.session_state.sections_included:
+        st.checkbox(
+            "Multiple Dwellings (2 homes)",
+            key="multiple_dwellings",
+            help="Check if the client has two separate home/dwelling policies (e.g., primary + vacation home)"
+        )
 
     # Current Policy Mode
     st.radio(
@@ -524,12 +622,18 @@ def render_upload_stage() -> None:
                         for s in st.session_state.sections_included:
                             if s not in c_combined and c.get(f"{s}_pdf") is not None:
                                 total_pdfs += 1
+                        # Count Dwelling 2 PDF if present
+                        if c.get("home_2_pdf") is not None:
+                            total_pdfs += 1
                         continue
                 # Non-combined: count each section PDF
                 total_pdfs += sum(
                     1 for s in st.session_state.sections_included
                     if c.get(f"{s}_pdf") is not None
                 )
+                # Count Dwelling 2 PDF if present
+                if c.get("home_2_pdf") is not None:
+                    total_pdfs += 1
 
             # Create progress tracking widgets
             progress_bar = st.progress(0.0, text="Starting extraction...")
@@ -540,6 +644,7 @@ def render_upload_stage() -> None:
             # Extract each carrier's PDFs
             for carrier_dict in named_carriers:
                 home_quote = None
+                home_2_quote = None
                 auto_quote = None
                 umbrella_quote = None
                 carrier_name = carrier_dict["name"]
@@ -650,10 +755,41 @@ def render_upload_stage() -> None:
                         with status_container:
                             st.write(f"    ⚠️ Failed: {error_msg}")
 
+                # --- Handle Dwelling 2 PDF (if multi-dwelling) ---
+                home_2_pdf = carrier_dict.get("home_2_pdf")
+                if home_2_pdf is not None:
+                    pdf_count += 1
+                    if total_pdfs > 0:
+                        progress_bar.progress(
+                            pdf_count / total_pdfs,
+                            text=f"Extracting {pdf_count}/{total_pdfs}: {carrier_name} - Home (Dwelling 2)"
+                        )
+
+                    with status_container:
+                        st.write(f"  → Extracting Home (Dwelling 2) quote...")
+
+                    result = extract_and_validate(
+                        home_2_pdf.read(), home_2_pdf.name, carrier_name=carrier_name
+                    )
+
+                    if result.success and result.quote:
+                        home_2_quote = result.quote
+                        if result.warnings:
+                            for w in result.warnings:
+                                all_warnings.append(f"**{carrier_name}** (home_2): {w}")
+                        with status_container:
+                            st.write(f"    ✅ Success (confidence: {result.quote.confidence})")
+                    else:
+                        error_msg = result.error or "Extraction failed"
+                        all_warnings.append(f"❌ **{carrier_name}** (home_2): {error_msg}")
+                        with status_container:
+                            st.write(f"    ⚠️ Failed: {error_msg}")
+
                 # Build carrier bundle (even if some quotes failed)
                 bundle = CarrierBundle(
                     carrier_name=carrier_name,
                     home=home_quote,
+                    home_2=home_2_quote,
                     auto=auto_quote,
                     umbrella=umbrella_quote,
                 )
@@ -694,7 +830,7 @@ def _render_coverage_limits_editor(carrier_idx: int, section: str, quote: Insura
     cl = quote.coverage_limits
     prefix = f"edit_carrier_{carrier_idx}_{section}"
 
-    if section == "home":
+    if section in ("home", "home_2"):
         col1, col2 = st.columns(2)
         with col1:
             st.number_input(
@@ -810,27 +946,46 @@ def _render_coverage_limits_editor(carrier_idx: int, section: str, quote: Insura
 def _render_carrier_editor(idx: int, bundle: CarrierBundle) -> None:
     """Render editable form for a single carrier's data."""
     sections = st.session_state.sections_included
+    is_multi_dw = st.session_state.get("multiple_dwellings", False) and bundle.home_2 is not None
 
     # --- Premium Summary ---
     st.markdown("**Premiums**")
-    prem_cols = st.columns(len(sections))
-    for j, section in enumerate(sections):
-        quote = getattr(bundle, section)  # home, auto, or umbrella
+    # Build premium fields: split Home into Home 1/Home 2 when multi-dwelling
+    prem_fields: list[tuple[str, str, float]] = []
+    if "home" in sections:
+        if is_multi_dw:
+            prem_fields.append(("home", "Home 1 Premium", bundle.home.annual_premium if bundle.home else 0.0))
+            prem_fields.append(("home_2", "Home 2 Premium", bundle.home_2.annual_premium if bundle.home_2 else 0.0))
+        else:
+            prem_fields.append(("home", "Home Premium", bundle.home.annual_premium if bundle.home else 0.0))
+    if "auto" in sections:
+        prem_fields.append(("auto", "Auto Premium", bundle.auto.annual_premium if bundle.auto else 0.0))
+    if "umbrella" in sections:
+        prem_fields.append(("umbrella", "Umbrella Premium", bundle.umbrella.annual_premium if bundle.umbrella else 0.0))
+
+    prem_cols = st.columns(len(prem_fields))
+    for j, (sec_key, label, val) in enumerate(prem_fields):
         with prem_cols[j]:
-            current_val = quote.annual_premium if quote else 0.0
             st.number_input(
-                f"{section.title()} Premium",
-                value=current_val,
-                key=f"edit_carrier_{idx}_{section}_premium",
+                label,
+                value=val,
+                key=f"edit_carrier_{idx}_{sec_key}_premium",
                 step=100.0,
                 format="%.2f"
             )
 
-    # --- Home Details ---
+    # --- Home Details (Dwelling 1) ---
     if "home" in sections and bundle.home:
         st.markdown("---")
-        st.markdown("**🏠 Home Coverage**")
+        dw1_label = "**🏠 Home Coverage - Dwelling 1**" if is_multi_dw else "**🏠 Home Coverage**"
+        st.markdown(dw1_label)
         _render_coverage_limits_editor(idx, "home", bundle.home)
+
+    # --- Home Details (Dwelling 2) ---
+    if is_multi_dw and bundle.home_2:
+        st.markdown("---")
+        st.markdown("**🏠 Home Coverage - Dwelling 2**")
+        _render_coverage_limits_editor(idx, "home_2", bundle.home_2)
 
     # --- Auto Details ---
     if "auto" in sections and bundle.auto:
@@ -844,10 +999,11 @@ def _render_carrier_editor(idx: int, bundle: CarrierBundle) -> None:
         st.markdown("**☂️ Umbrella Coverage**")
         _render_coverage_limits_editor(idx, "umbrella", bundle.umbrella)
 
-    # --- Deductibles (home-level) ---
+    # --- Deductibles (Dwelling 1) ---
     if bundle.home:
         st.markdown("---")
-        st.markdown("**Deductibles**")
+        ded_label = "**Deductibles - Dwelling 1**" if is_multi_dw else "**Deductibles**"
+        st.markdown(ded_label)
         ded_cols = st.columns(2)
         with ded_cols[0]:
             st.number_input(
@@ -861,7 +1017,28 @@ def _render_carrier_editor(idx: int, bundle: CarrierBundle) -> None:
             st.number_input(
                 "Wind/Hail Deductible",
                 value=bundle.home.wind_hail_deductible or 0.0,
-                key=f"edit_carrier_{idx}_wind_hail_deductible",
+                key=f"edit_carrier_{idx}_home_wind_hail_deductible",
+                step=500.0,
+                format="%.0f"
+            )
+
+    # --- Deductibles (Dwelling 2) ---
+    if is_multi_dw and bundle.home_2:
+        st.markdown("**Deductibles - Dwelling 2**")
+        ded2_cols = st.columns(2)
+        with ded2_cols[0]:
+            st.number_input(
+                "All-Peril Deductible (Dw2)",
+                value=bundle.home_2.deductible or 0.0,
+                key=f"edit_carrier_{idx}_home_2_deductible",
+                step=500.0,
+                format="%.0f"
+            )
+        with ded2_cols[1]:
+            st.number_input(
+                "Wind/Hail Deductible (Dw2)",
+                value=bundle.home_2.wind_hail_deductible or 0.0,
+                key=f"edit_carrier_{idx}_home_2_wind_hail_deductible",
                 step=500.0,
                 format="%.0f"
             )
@@ -874,6 +1051,9 @@ def _render_carrier_editor(idx: int, bundle: CarrierBundle) -> None:
         quote = getattr(bundle, section)
         if quote and quote.endorsements:
             all_endorsements.extend(quote.endorsements)
+    # Also include home_2 endorsements
+    if bundle.home_2 and bundle.home_2.endorsements:
+        all_endorsements.extend(bundle.home_2.endorsements)
     unique_endorsements = list(dict.fromkeys(all_endorsements))
 
     st.text_area(
@@ -890,6 +1070,9 @@ def _render_carrier_editor(idx: int, bundle: CarrierBundle) -> None:
         quote = getattr(bundle, section)
         if quote and quote.discounts_applied:
             all_discounts.extend(quote.discounts_applied)
+    # Also include home_2 discounts
+    if bundle.home_2 and bundle.home_2.discounts_applied:
+        all_discounts.extend(bundle.home_2.discounts_applied)
     unique_discounts = list(dict.fromkeys(all_discounts))
 
     st.text_area(
@@ -906,6 +1089,9 @@ def _render_carrier_editor(idx: int, bundle: CarrierBundle) -> None:
         quote = getattr(bundle, section)
         if quote and quote.notes:
             all_notes.append(f"[{section.title()}] {quote.notes}")
+    # Also include home_2 notes
+    if bundle.home_2 and bundle.home_2.notes:
+        all_notes.append(f"[Home 2] {bundle.home_2.notes}")
 
     st.text_area(
         "Notes",
@@ -921,7 +1107,7 @@ def _build_edited_quote(carrier_idx: int, section: str, original: InsuranceQuote
 
     # Read coverage limits from session state
     cl_fields = {}
-    if section == "home":
+    if section in ("home", "home_2"):
         for field in ["dwelling", "other_structures", "personal_property",
                       "loss_of_use", "personal_liability", "medical_payments"]:
             val = st.session_state.get(f"{prefix}_{field}", 0.0)
@@ -940,12 +1126,12 @@ def _build_edited_quote(carrier_idx: int, section: str, original: InsuranceQuote
     # Read premium
     premium = st.session_state.get(f"edit_carrier_{carrier_idx}_{section}_premium", 0.0)
 
-    # Read deductibles (home only)
+    # Read deductibles (home/home_2 only)
     deductible = 0.0
     wind_hail_deductible = None
-    if section == "home":
-        deductible = st.session_state.get(f"edit_carrier_{carrier_idx}_home_deductible", 0.0)
-        wind_hail_val = st.session_state.get(f"edit_carrier_{carrier_idx}_wind_hail_deductible", 0.0)
+    if section in ("home", "home_2"):
+        deductible = st.session_state.get(f"edit_carrier_{carrier_idx}_{section}_deductible", 0.0)
+        wind_hail_val = st.session_state.get(f"edit_carrier_{carrier_idx}_{section}_wind_hail_deductible", 0.0)
         wind_hail_deductible = wind_hail_val if wind_hail_val != 0.0 else None
     else:
         # For auto/umbrella, use original deductible or default to 0.0
@@ -987,11 +1173,14 @@ def _build_edited_bundles() -> list[CarrierBundle]:
 
     for i, original_bundle in enumerate(st.session_state.carrier_bundles):
         home_quote = None
+        home_2_quote = None
         auto_quote = None
         umbrella_quote = None
 
         if "home" in sections and original_bundle.home:
             home_quote = _build_edited_quote(i, "home", original_bundle.home)
+        if original_bundle.home_2:
+            home_2_quote = _build_edited_quote(i, "home_2", original_bundle.home_2)
         if "auto" in sections and original_bundle.auto:
             auto_quote = _build_edited_quote(i, "auto", original_bundle.auto)
         if "umbrella" in sections and original_bundle.umbrella:
@@ -1000,6 +1189,7 @@ def _build_edited_bundles() -> list[CarrierBundle]:
         edited.append(CarrierBundle(
             carrier_name=original_bundle.carrier_name,
             home=home_quote,
+            home_2=home_2_quote,
             auto=auto_quote,
             umbrella=umbrella_quote,
         ))
@@ -1029,6 +1219,13 @@ def _build_edited_current_policy() -> Optional[CurrentPolicy]:
         home_liability=clean_float("edit_cp_home_liability"),
         home_loss_of_use=clean_float("edit_cp_home_loss_of_use"),
         home_deductible=clean_float("edit_cp_home_deductible"),
+        home_2_premium=clean_float("edit_cp_home_2_premium"),
+        home_2_dwelling=clean_float("edit_cp_home_2_dwelling"),
+        home_2_other_structures=clean_float("edit_cp_home_2_other_structures"),
+        home_2_personal_property=clean_float("edit_cp_home_2_personal_property"),
+        home_2_liability=clean_float("edit_cp_home_2_liability"),
+        home_2_loss_of_use=clean_float("edit_cp_home_2_loss_of_use"),
+        home_2_deductible=clean_float("edit_cp_home_2_deductible"),
         auto_premium=clean_float("edit_cp_auto_premium"),
         auto_limits=clean_str("edit_cp_auto_limits"),
         auto_um_uim=clean_str("edit_cp_auto_um_uim"),
@@ -1115,6 +1312,62 @@ def render_review_stage() -> None:
                         "Deductible",
                         value=cp.home_deductible or 0.0,
                         key="edit_cp_home_deductible",
+                        step=500.0,
+                        format="%.0f"
+                    )
+
+            # Dwelling 2 fields (if multi-dwelling)
+            if "home" in sections and st.session_state.get("multiple_dwellings", False):
+                st.subheader("🏠 Home - Dwelling 2")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.number_input(
+                        "Premium (Dw2)",
+                        value=cp.home_2_premium or 0.0,
+                        key="edit_cp_home_2_premium",
+                        step=100.0,
+                        format="%.2f"
+                    )
+                    st.number_input(
+                        "Dwelling (Dw2)",
+                        value=cp.home_2_dwelling or 0.0,
+                        key="edit_cp_home_2_dwelling",
+                        step=10000.0,
+                        format="%.0f"
+                    )
+                    st.number_input(
+                        "Other Structures (Dw2)",
+                        value=cp.home_2_other_structures or 0.0,
+                        key="edit_cp_home_2_other_structures",
+                        step=1000.0,
+                        format="%.0f"
+                    )
+                    st.number_input(
+                        "Personal Property (Dw2)",
+                        value=cp.home_2_personal_property or 0.0,
+                        key="edit_cp_home_2_personal_property",
+                        step=1000.0,
+                        format="%.0f"
+                    )
+                with col2:
+                    st.number_input(
+                        "Liability (Dw2)",
+                        value=cp.home_2_liability or 0.0,
+                        key="edit_cp_home_2_liability",
+                        step=50000.0,
+                        format="%.0f"
+                    )
+                    st.number_input(
+                        "Loss of Use (Dw2)",
+                        value=cp.home_2_loss_of_use or 0.0,
+                        key="edit_cp_home_2_loss_of_use",
+                        step=1000.0,
+                        format="%.0f"
+                    )
+                    st.number_input(
+                        "Deductible (Dw2)",
+                        value=cp.home_2_deductible or 0.0,
+                        key="edit_cp_home_2_deductible",
                         step=500.0,
                         format="%.0f"
                     )

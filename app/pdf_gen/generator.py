@@ -82,6 +82,16 @@ def _sanitize_text(text: str) -> str:
     return text
 
 
+def _session_has_multi_dwelling(
+    current_policy: Optional[CurrentPolicy],
+    carriers: list[CarrierBundle]
+) -> bool:
+    """Detect if session has multi-dwelling data."""
+    if current_policy and current_policy.home_2_premium:
+        return True
+    return any(c.home_2 is not None for c in carriers)
+
+
 _BRACKET_TAG_RE = re.compile(r"^\s*\[\w+\]\s*")
 
 
@@ -409,21 +419,49 @@ class SciotoComparisonPDF(FPDF):
         )
 
         row_idx = 0
+        is_multi_dw = _session_has_multi_dwelling(current_policy, carriers)
 
         # Home Premium (if included)
         if "home" in sections_included:
-            self._add_data_row(
-                label="Home Premium",
-                values=self._extract_premium_row("home", current_policy, carriers),
-                row_idx=row_idx,
-                label_col_w=label_col_w,
-                data_col_w=data_col_w,
-                x_start=x_start,
-                font_size=body_font,
-                row_h=row_h,
-                current_policy=current_policy
-            )
-            row_idx += 1
+            if is_multi_dw:
+                # Split into Home 1 / Home 2 rows
+                self._add_data_row(
+                    label="Home 1 Premium",
+                    values=self._extract_premium_row("home", current_policy, carriers),
+                    row_idx=row_idx,
+                    label_col_w=label_col_w,
+                    data_col_w=data_col_w,
+                    x_start=x_start,
+                    font_size=body_font,
+                    row_h=row_h,
+                    current_policy=current_policy
+                )
+                row_idx += 1
+                self._add_data_row(
+                    label="Home 2 Premium",
+                    values=self._extract_premium_row("home_2", current_policy, carriers),
+                    row_idx=row_idx,
+                    label_col_w=label_col_w,
+                    data_col_w=data_col_w,
+                    x_start=x_start,
+                    font_size=body_font,
+                    row_h=row_h,
+                    current_policy=current_policy
+                )
+                row_idx += 1
+            else:
+                self._add_data_row(
+                    label="Home Premium",
+                    values=self._extract_premium_row("home", current_policy, carriers),
+                    row_idx=row_idx,
+                    label_col_w=label_col_w,
+                    data_col_w=data_col_w,
+                    x_start=x_start,
+                    font_size=body_font,
+                    row_h=row_h,
+                    current_policy=current_policy
+                )
+                row_idx += 1
 
         # Auto Premium (if included)
         if "auto" in sections_included:
@@ -472,6 +510,8 @@ class SciotoComparisonPDF(FPDF):
         carriers: list[CarrierBundle]
     ):
         """Home Details section: Dwelling, Other Structures, etc."""
+        is_multi_dw = _session_has_multi_dwelling(current_policy, carriers)
+
         self.ln(3)  # Small gap between sections
         self._add_section_divider_row(
             "HOME DETAILS", label_col_w, data_col_w, x_start, body_font,
@@ -489,19 +529,41 @@ class SciotoComparisonPDF(FPDF):
             ("Wind/Hail Deductible", "wind_hail_deductible", None),
         ]
 
-        for row_idx, (label, carrier_key, current_key) in enumerate(home_rows):
-            values = self._extract_home_row(carrier_key, current_key, current_policy, carriers)
-            self._add_data_row(
-                label=label,
-                values=values,
-                row_idx=row_idx,
-                label_col_w=label_col_w,
-                data_col_w=data_col_w,
-                x_start=x_start,
-                font_size=body_font,
-                row_h=row_h,
-                current_policy=current_policy
+        if is_multi_dw:
+            # Dwelling 1 sub-section
+            self._add_sub_divider_row(
+                "DWELLING 1", label_col_w, data_col_w, x_start, body_font,
+                current_policy, carriers
             )
+            for row_idx, (label, carrier_key, current_key) in enumerate(home_rows):
+                values = self._extract_home_row(carrier_key, current_key, current_policy, carriers, dwelling=1)
+                self._add_data_row(
+                    label=label, values=values, row_idx=row_idx,
+                    label_col_w=label_col_w, data_col_w=data_col_w, x_start=x_start,
+                    font_size=body_font, row_h=row_h, current_policy=current_policy
+                )
+
+            # Dwelling 2 sub-section
+            self._add_sub_divider_row(
+                "DWELLING 2", label_col_w, data_col_w, x_start, body_font,
+                current_policy, carriers
+            )
+            for row_idx, (label, carrier_key, current_key) in enumerate(home_rows):
+                values = self._extract_home_row(carrier_key, current_key, current_policy, carriers, dwelling=2)
+                self._add_data_row(
+                    label=label, values=values, row_idx=row_idx,
+                    label_col_w=label_col_w, data_col_w=data_col_w, x_start=x_start,
+                    font_size=body_font, row_h=row_h, current_policy=current_policy
+                )
+        else:
+            # Single dwelling — no sub-dividers
+            for row_idx, (label, carrier_key, current_key) in enumerate(home_rows):
+                values = self._extract_home_row(carrier_key, current_key, current_policy, carriers)
+                self._add_data_row(
+                    label=label, values=values, row_idx=row_idx,
+                    label_col_w=label_col_w, data_col_w=data_col_w, x_start=x_start,
+                    font_size=body_font, row_h=row_h, current_policy=current_policy
+                )
 
     def _add_auto_section(
         self,
@@ -640,6 +702,8 @@ class SciotoComparisonPDF(FPDF):
         if current_policy:
             if policy_type == "home":
                 values.append(self._fmt_currency(current_policy.home_premium))
+            elif policy_type == "home_2":
+                values.append(self._fmt_currency(current_policy.home_2_premium))
             elif policy_type == "auto":
                 values.append(self._fmt_currency(current_policy.auto_premium))
             elif policy_type == "umbrella":
@@ -649,6 +713,8 @@ class SciotoComparisonPDF(FPDF):
         for carrier in carriers:
             if policy_type == "home" and carrier.home:
                 values.append(self._fmt_currency(carrier.home.annual_premium))
+            elif policy_type == "home_2" and carrier.home_2:
+                values.append(self._fmt_currency(carrier.home_2.annual_premium))
             elif policy_type == "auto" and carrier.auto:
                 values.append(self._fmt_currency(carrier.auto.annual_premium))
             elif policy_type == "umbrella" and carrier.umbrella:
@@ -663,29 +729,36 @@ class SciotoComparisonPDF(FPDF):
         carrier_key: str,  # e.g., "dwelling", "deductible"
         current_key: Optional[str],  # e.g., "home_dwelling", "home_deductible"
         current_policy: Optional[CurrentPolicy],
-        carriers: list[CarrierBundle]
+        carriers: list[CarrierBundle],
+        dwelling: int = 1  # 1 for primary, 2 for Dwelling 2
     ) -> list[str]:
-        """Extract home coverage row values."""
+        """Extract home coverage row values for a given dwelling number."""
         values = []
 
+        # For Dwelling 2, adjust current_key to home_2_* prefix
+        effective_current_key = current_key
+        if dwelling == 2 and current_key:
+            effective_current_key = current_key.replace("home_", "home_2_", 1)
+
         # Current Policy value
-        if current_policy and current_key:
-            current_val = getattr(current_policy, current_key, None)
+        if current_policy and effective_current_key:
+            current_val = getattr(current_policy, effective_current_key, None)
             values.append(self._fmt_currency(current_val))
         elif current_policy:
             values.append("-")  # Field doesn't exist on CurrentPolicy
 
-        # Carrier values
+        # Carrier values — select the right dwelling quote
         for carrier in carriers:
-            if not carrier.home:
+            quote = carrier.home if dwelling == 1 else carrier.home_2
+            if not quote:
                 values.append("-")
             elif carrier_key in ["deductible", "wind_hail_deductible"]:
                 # Direct attributes on InsuranceQuote
-                val = getattr(carrier.home, carrier_key, None)
+                val = getattr(quote, carrier_key, None)
                 values.append(self._fmt_currency(val) if val else "-")
             else:
                 # coverage_limits model field
-                val = getattr(carrier.home.coverage_limits, carrier_key, None)
+                val = getattr(quote.coverage_limits, carrier_key, None)
                 if val is None:
                     values.append("-")
                 elif isinstance(val, str):
@@ -828,6 +901,30 @@ class SciotoComparisonPDF(FPDF):
         self.cell(total_w, 6, _sanitize_text(f"  {title}"), border=1, fill=True, align="L")
         self.ln(6)
 
+    def _add_sub_divider_row(
+        self,
+        title: str,
+        label_w: float,
+        data_col_w: float,
+        x_start: float,
+        font_size: float,
+        current_policy: Optional[CurrentPolicy],
+        carriers: list[CarrierBundle]
+    ):
+        """Lighter sub-header for DWELLING 1 / DWELLING 2 labels."""
+        self._ensure_space(7)
+        y = self.get_y()
+
+        num_data_cols = len(carriers) + (1 if current_policy else 0)
+        total_w = label_w + num_data_cols * data_col_w
+
+        self.set_fill_color(*BRAND["primary_light"])
+        self.set_text_color(*BRAND["white"])
+        self.set_font(self.font_family_name, "B", font_size - 1)
+        self.set_xy(x_start, y)
+        self.cell(total_w, 5, _sanitize_text(f"  {title}"), border=1, fill=True, align="L")
+        self.ln(5)
+
     def _add_data_row(
         self,
         label: str,
@@ -893,7 +990,7 @@ class SciotoComparisonPDF(FPDF):
             all_endorsements = []
             all_discounts = []
 
-            for policy_type in ["home", "auto", "umbrella"]:
+            for policy_type in ["home", "home_2", "auto", "umbrella"]:
                 quote = getattr(bundle, policy_type)
                 if quote:
                     all_endorsements.extend(quote.endorsements)
@@ -940,7 +1037,7 @@ class SciotoComparisonPDF(FPDF):
         # Part A: Per-carrier notes (from InsuranceQuote.notes)
         carrier_notes_exist = False
         for bundle in carriers:
-            for policy_type in ["home", "auto", "umbrella"]:
+            for policy_type in ["home", "home_2", "auto", "umbrella"]:
                 quote = getattr(bundle, policy_type)
                 if quote and quote.notes:
                     carrier_notes_exist = True
@@ -953,11 +1050,12 @@ class SciotoComparisonPDF(FPDF):
             for bundle in carriers:
                 # Collect notes from all policies in bundle
                 notes_list = []
-                for policy_type in ["home", "auto", "umbrella"]:
+                for policy_type in ["home", "home_2", "auto", "umbrella"]:
                     quote = getattr(bundle, policy_type)
                     if quote and quote.notes:
                         clean_note = _strip_bracket_tag(quote.notes)
-                        notes_list.append(f"{policy_type.title()}: {clean_note}")
+                        display_label = "Home 2" if policy_type == "home_2" else policy_type.title()
+                        notes_list.append(f"{display_label}: {clean_note}")
 
                 if notes_list:
                     self._ensure_space(10)

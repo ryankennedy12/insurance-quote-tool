@@ -642,8 +642,175 @@ def create_test_4_3carriers_no_current() -> ComparisonSession:
     )
 
 
+def create_test_5_multi_dwelling() -> ComparisonSession:
+    """Test 5: 2 carriers + current policy, 2 dwellings + auto (multi-dwelling)."""
+
+    current = CurrentPolicy(
+        carrier_name="Nationwide",
+        # Dwelling 1
+        home_premium=1450.0,
+        home_dwelling=325000.0,
+        home_other_structures=32500.0,
+        home_liability=300000.0,
+        home_personal_property=162500.0,
+        home_loss_of_use=65000.0,
+        home_deductible=1000.0,
+        # Dwelling 2 (vacation home)
+        home_2_premium=980.0,
+        home_2_dwelling=185000.0,
+        home_2_other_structures=18500.0,
+        home_2_liability=300000.0,
+        home_2_personal_property=92500.0,
+        home_2_loss_of_use=37000.0,
+        home_2_deductible=2500.0,
+        # Auto
+        auto_premium=2280.0,
+        auto_limits="250/500/100",
+        auto_um_uim="250/500",
+        auto_comp_deductible="$500",
+        auto_collision_deductible=500.0,
+    )
+
+    # Erie bundle
+    erie_home1 = InsuranceQuote(
+        carrier_name="Erie Insurance",
+        policy_type="HO3",
+        annual_premium=1285.0,
+        deductible=1000.0,
+        wind_hail_deductible=2500.0,
+        coverage_limits={
+            "dwelling": 325000,
+            "other_structures": 32500,
+            "personal_property": 162500,
+            "loss_of_use": 65000,
+            "personal_liability": 300000,
+            "medical_payments": 5000,
+        },
+        endorsements=["Water Backup ($10K)", "Extended Replacement Cost (125%)"],
+        discounts_applied=["Multi-Policy", "Claims-Free"],
+        confidence="high",
+        notes="Primary residence. Excellent rate with water backup.",
+    )
+
+    erie_home2 = InsuranceQuote(
+        carrier_name="Erie Insurance",
+        policy_type="HO3",
+        annual_premium=895.0,
+        deductible=2500.0,
+        wind_hail_deductible=5000.0,
+        coverage_limits={
+            "dwelling": 185000,
+            "other_structures": 18500,
+            "personal_property": 92500,
+            "loss_of_use": 37000,
+            "personal_liability": 300000,
+            "medical_payments": 5000,
+        },
+        endorsements=["Seasonal Dwelling Endorsement"],
+        discounts_applied=["Multi-Policy"],
+        confidence="high",
+        notes="Vacation home at Hocking Hills. Seasonal occupancy.",
+    )
+
+    erie_auto = InsuranceQuote(
+        carrier_name="Erie Insurance",
+        policy_type="Auto",
+        annual_premium=1995.0,
+        deductible=500.0,
+        coverage_limits={
+            "bi_per_person": 500_000,
+            "bi_per_accident": 500_000,
+            "pd_per_accident": 250_000,
+            "um_uim": 500_000,
+            "comprehensive": 500,
+        },
+        endorsements=["Accident Forgiveness", "Vanishing Deductible"],
+        discounts_applied=["Multi-Policy", "Safe Driver"],
+        confidence="high",
+        notes="2 vehicles: 2021 Honda Pilot + 2023 Toyota Camry.",
+    )
+
+    # Westfield bundle
+    westfield_home1 = InsuranceQuote(
+        carrier_name="Westfield",
+        policy_type="HO5",
+        annual_premium=1425.0,
+        deductible=1000.0,
+        coverage_limits={
+            "dwelling": 325000,
+            "other_structures": 32500,
+            "personal_property": 243750,
+            "loss_of_use": 65000,
+            "personal_liability": 500000,
+            "medical_payments": 5000,
+        },
+        endorsements=["Ordinance or Law (50%)", "Equipment Breakdown"],
+        discounts_applied=["New Home", "Protective Device"],
+        confidence="high",
+        notes="HO5 open-perils with higher liability.",
+    )
+
+    westfield_home2 = InsuranceQuote(
+        carrier_name="Westfield",
+        policy_type="HO3",
+        annual_premium=950.0,
+        deductible=2500.0,
+        coverage_limits={
+            "dwelling": 185000,
+            "other_structures": 18500,
+            "personal_property": 92500,
+            "loss_of_use": 37000,
+            "personal_liability": 300000,
+            "medical_payments": 5000,
+        },
+        endorsements=["Vacancy Permit"],
+        discounts_applied=["Multi-Policy"],
+        confidence="high",
+        notes="Vacation property coverage. Standard HO3.",
+    )
+
+    westfield_auto = InsuranceQuote(
+        carrier_name="Westfield",
+        policy_type="Auto",
+        annual_premium=2120.0,
+        deductible=500.0,
+        coverage_limits={
+            "bi_per_person": 500_000,
+            "bi_per_accident": 500_000,
+            "pd_per_accident": 250_000,
+            "um_uim": 500_000,
+            "comprehensive": 500,
+        },
+        endorsements=["Rental Reimbursement", "Roadside Assistance"],
+        discounts_applied=["Bundle Discount", "Safe Driver"],
+        confidence="high",
+        notes="Good coverage but auto rate higher than Erie.",
+    )
+
+    return ComparisonSession(
+        client_name="Mark & Lisa Johnson",
+        date="2026-02-13",
+        current_policy=current,
+        carriers=[
+            CarrierBundle(
+                carrier_name="Erie Insurance",
+                home=erie_home1,
+                home_2=erie_home2,
+                auto=erie_auto,
+            ),
+            CarrierBundle(
+                carrier_name="Westfield",
+                home=westfield_home1,
+                home_2=westfield_home2,
+                auto=westfield_auto,
+            ),
+        ],
+        sections_included=["home", "auto"],
+    )
+
+
 def main():
-    """Generate all 4 test PDFs."""
+    """Generate all test PDFs."""
     output_dir = Path("data/outputs")
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -657,6 +824,7 @@ def main():
         ("test_3carriers_current.pdf", create_test_2_3carriers_current(), "3 carriers + current, home + auto"),
         ("test_5carriers_current.pdf", create_test_3_5carriers_current(), "5 carriers + current, full bundle"),
         ("test_3carriers_no_current.pdf", create_test_4_3carriers_no_current(), "3 carriers, no current, with notes"),
+        ("test_multi_dwelling.pdf", create_test_5_multi_dwelling(), "2 carriers + current, 2 dwellings + auto"),
     ]
 
     for filename, session, description in tests:
