@@ -49,6 +49,8 @@ class QuotaExceededError(SheetsClientError):
 MAROON_BG: dict = {"red": 0.529, "green": 0.110, "blue": 0.188}
 WHITE_TEXT: dict = {"red": 1.0, "green": 1.0, "blue": 1.0}
 LIGHT_GRAY_BG: dict = {"red": 0.973, "green": 0.973, "blue": 0.973}
+CURRENT_COL_BG: dict = {"red": 1.0, "green": 0.973, "blue": 0.941}  # #FFF8F0
+CURRENT_HEADER_BG: dict = {"red": 0.961, "green": 0.902, "blue": 0.827}  # #F5E6D3
 
 ROW_LABELS: list[str] = [
     "",                    # Row 1: title (handled separately)
@@ -167,7 +169,10 @@ class SheetsClient:
             self._write_to_worksheet(new_ws, grid)
 
             # 4. Apply formatting
-            self._apply_formatting(new_ws, num_data_cols)
+            self._apply_formatting(
+                new_ws, num_data_cols,
+                has_current_policy=session.current_policy is not None,
+            )
 
             # 5. Construct URL
             url = (
@@ -613,13 +618,16 @@ class SheetsClient:
 
         grid: list[list[Any]] = []
 
-        # Row 1: Title (merged across all columns)
+        # Row 1: Title (A1:A2 reserved for manual logo placement — the
+        # Google Sheets API has no addImage/insertImage request type, so
+        # logo must be inserted manually or via Apps Script)
         grid.append(
-            [f"Quote Comparison \u2014 {session.client_name}"] + [""] * num_data_cols
+            ["", f"Quote Comparison \u2014 {session.client_name}"]
+            + [""] * max(0, num_data_cols - 1)
         )
 
-        # Row 2: Date
-        grid.append([session.date] + [""] * num_data_cols)
+        # Row 2: Date (B2, A2 is part of logo merge)
+        grid.append(["", session.date] + [""] * max(0, num_data_cols - 1))
 
         # Row 3: Carrier names header
         carrier_header: list[Any] = [""]
@@ -721,16 +729,21 @@ class SheetsClient:
         logger.info("Wrote %d rows to worksheet %s", len(grid), worksheet.title)
 
     def _apply_formatting(
-        self, worksheet: gspread.Worksheet, num_data_cols: int
+        self,
+        worksheet: gspread.Worksheet,
+        num_data_cols: int,
+        *,
+        has_current_policy: bool = True,
     ) -> None:
         """Apply all formatting to worksheet.
 
         Uses batch_format() for cell formatting and spreadsheet.batch_update()
-        for column widths and cell merge.
+        for column widths and cell merges.
 
         Args:
             worksheet: Target worksheet
             num_data_cols: Number of data columns
+            has_current_policy: Whether column B is a current policy column
         """
         last_col = chr(ord('A') + num_data_cols)
         sheet_id = worksheet.id
@@ -748,10 +761,17 @@ class SheetsClient:
             },
         }
         for row in HEADER_ROWS:
-            formats.append({
-                "range": f"A{row}:{last_col}{row}",
-                "format": maroon_fmt,
-            })
+            if row == 1:
+                # Title row starts at B1 (A1:A2 reserved for logo)
+                formats.append({
+                    "range": f"B1:{last_col}1",
+                    "format": maroon_fmt,
+                })
+            else:
+                formats.append({
+                    "range": f"A{row}:{last_col}{row}",
+                    "format": maroon_fmt,
+                })
 
         # --- Bold total (row 7) ---
         formats.append({
@@ -777,6 +797,22 @@ class SheetsClient:
             formats.append({
                 "range": f"A{row}:{last_col}{row}",
                 "format": {"backgroundColor": LIGHT_GRAY_BG},
+            })
+
+        # --- Current Policy column: cream background (applied AFTER gray
+        #     so it overrides alternating shading for column B) ---
+        if has_current_policy:
+            formats.append({
+                "range": "B4:B25",
+                "format": {"backgroundColor": CURRENT_COL_BG},
+            })
+            # Dark cream + bold header for "Current: {name}" (overrides maroon on B3)
+            formats.append({
+                "range": "B3",
+                "format": {
+                    "backgroundColor": CURRENT_HEADER_BG,
+                    "textFormat": {"bold": True},
+                },
             })
 
         # --- Thin borders (A3 through last_col:25) ---
@@ -808,9 +844,9 @@ class SheetsClient:
             "format": {"horizontalAlignment": "LEFT"},
         })
 
-        # --- Date row: italic, left ---
+        # --- Date row: italic, left (B2 — A2 is part of logo merge) ---
         formats.append({
-            "range": f"A2:{last_col}2",
+            "range": f"B2:{last_col}2",
             "format": {
                 "textFormat": {"italic": True},
                 "horizontalAlignment": "LEFT",
@@ -821,7 +857,7 @@ class SheetsClient:
         worksheet.batch_format(formats)
         logger.info("Applied %d format rules", len(formats))
 
-        # --- Column widths + row 1 merge via raw batch_update ---
+        # --- Column widths + merges via raw batch_update ---
         requests: list[dict] = [
             # Column A width
             {
@@ -849,14 +885,28 @@ class SheetsClient:
                     "fields": "pixelSize",
                 },
             },
-            # Merge row 1 across all columns
+            # Merge A1:A2 for logo placeholder (insert logo manually or
+            # via Apps Script — Sheets REST API has no image insertion)
+            {
+                "mergeCells": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 0,
+                        "endRowIndex": 2,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": 1,
+                    },
+                    "mergeType": "MERGE_ALL",
+                },
+            },
+            # Merge B1:last_col for title
             {
                 "mergeCells": {
                     "range": {
                         "sheetId": sheet_id,
                         "startRowIndex": 0,
                         "endRowIndex": 1,
-                        "startColumnIndex": 0,
+                        "startColumnIndex": 1,
                         "endColumnIndex": 1 + num_data_cols,
                     },
                     "mergeType": "MERGE_ALL",
@@ -865,4 +915,4 @@ class SheetsClient:
         ]
 
         self.spreadsheet.batch_update({"requests": requests})
-        logger.info("Applied column widths and row 1 merge")
+        logger.info("Applied column widths and merges")
