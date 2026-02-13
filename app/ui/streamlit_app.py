@@ -5,6 +5,7 @@ Phase 5, Steps 12-14: Upload, Review & Edit, Export Stages
 Entry point: streamlit run app/ui/streamlit_app.py
 """
 
+import base64
 import streamlit as st
 import logging
 from datetime import datetime
@@ -1206,39 +1207,366 @@ def render_export_stage() -> None:
     st.info("You can re-generate exports after making changes. Go back to Review to edit data.")
 
 
+def inject_custom_css() -> None:
+    """Inject custom CSS for professional styling and branding."""
+    st.markdown("""
+    <style>
+    /* ── Hide Streamlit defaults ── */
+    #MainMenu {visibility: hidden !important;}
+    footer {visibility: hidden !important;}
+    .stDeployButton {display: none !important;}
+    [data-testid="stHeader"] {display: none !important;}
+    [data-testid="stToolbar"] {display: none !important;}
+    [data-testid="stDecoration"] {display: none !important;}
+
+    /* ── Global Typography ── */
+    .block-container {
+        padding-top: 1.5rem !important;
+        padding-bottom: 2rem !important;
+        max-width: 1100px !important;
+    }
+    h1, .branded-title {
+        color: #871c30 !important;
+        font-weight: 700 !important;
+    }
+    h2 {
+        color: #871c30 !important;
+        font-size: 1.3rem !important;
+        font-weight: 600 !important;
+        border-bottom: 2px solid #f0e8e0;
+        padding-bottom: 0.4rem;
+        margin-top: 1.2rem !important;
+        margin-bottom: 0.8rem !important;
+    }
+    h3 {
+        color: #5a1220 !important;
+        font-size: 1.05rem !important;
+        font-weight: 600 !important;
+        margin-top: 0.8rem !important;
+    }
+
+    /* ── Primary Buttons — maroon with white text ── */
+    .stButton > button[kind="primary"],
+    .stFormSubmitButton > button[kind="primary"] {
+        background-color: #871c30 !important;
+        border-color: #871c30 !important;
+        color: white !important;
+        font-weight: 600 !important;
+        border-radius: 6px !important;
+        padding: 0.5rem 1.5rem !important;
+        transition: all 0.2s ease !important;
+    }
+    .stButton > button[kind="primary"]:hover,
+    .stFormSubmitButton > button[kind="primary"]:hover {
+        background-color: #6b1626 !important;
+        border-color: #6b1626 !important;
+        box-shadow: 0 2px 10px rgba(135, 28, 48, 0.35) !important;
+    }
+    .stButton > button[kind="primary"]:active,
+    .stFormSubmitButton > button[kind="primary"]:active {
+        background-color: #551220 !important;
+        transform: translateY(1px) !important;
+    }
+
+    /* Secondary buttons */
+    .stButton > button[kind="secondary"],
+    .stButton > button:not([kind="primary"]) {
+        border: 1.5px solid #871c30 !important;
+        color: #871c30 !important;
+        font-weight: 500 !important;
+        border-radius: 6px !important;
+        transition: all 0.2s ease !important;
+    }
+    .stButton > button[kind="secondary"]:hover,
+    .stButton > button:not([kind="primary"]):hover {
+        background-color: rgba(135, 28, 48, 0.06) !important;
+        border-color: #6b1626 !important;
+        color: #6b1626 !important;
+    }
+
+    /* ── Expander Styling (Step Accordion) ── */
+    .streamlit-expanderHeader {
+        font-size: 1.05rem !important;
+        font-weight: 600 !important;
+        background-color: #faf7f4 !important;
+        border-radius: 8px 8px 0 0 !important;
+        border-left: 4px solid #871c30 !important;
+        padding: 0.75rem 1rem !important;
+    }
+    .streamlit-expanderContent {
+        border-left: 4px solid #871c30 !important;
+        border-radius: 0 0 8px 8px !important;
+        padding-top: 0.5rem !important;
+    }
+
+    /* ── Containers / Cards ── */
+    [data-testid="stExpander"] {
+        border: 1px solid #e8e0d8 !important;
+        border-radius: 8px !important;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06) !important;
+        margin-bottom: 0.75rem !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(> div > div[data-testid="stVerticalBlock"]) {
+        border-radius: 8px !important;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05) !important;
+    }
+
+    /* ── Sidebar Styling ── */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #faf7f4 0%, #f4ede5 100%) !important;
+    }
+    [data-testid="stSidebar"] hr {
+        border-color: #e0d6cc !important;
+    }
+    [data-testid="stSidebar"] .stButton > button {
+        width: 100% !important;
+    }
+
+    /* ── Form inputs — subtle refinements ── */
+    .stTextInput > div > div > input,
+    .stNumberInput > div > div > input,
+    .stTextArea > div > div > textarea {
+        border-radius: 6px !important;
+    }
+    .stTextInput > div > div > input:focus,
+    .stNumberInput > div > div > input:focus,
+    .stTextArea > div > div > textarea:focus {
+        border-color: #871c30 !important;
+        box-shadow: 0 0 0 1px #871c30 !important;
+    }
+
+    /* ── Progress bar ── */
+    .stProgress > div > div > div > div {
+        background-color: #871c30 !important;
+    }
+
+    /* ── File uploader ── */
+    [data-testid="stFileUploader"] section {
+        border-radius: 8px !important;
+        border: 1.5px dashed #c9b8a8 !important;
+        transition: border-color 0.2s ease !important;
+    }
+    [data-testid="stFileUploader"] section:hover {
+        border-color: #871c30 !important;
+    }
+
+    /* ── Multiselect pills ── */
+    [data-testid="stMultiSelect"] span[data-baseweb="tag"] {
+        background-color: #871c30 !important;
+        color: white !important;
+    }
+
+    /* ── Hide heading anchor links ── */
+    [data-testid="stHeading"] a {
+        display: none !important;
+    }
+    h1 a, h2 a, h3 a {
+        display: none !important;
+    }
+
+    /* ── Radio buttons ── */
+    .stRadio > div {
+        gap: 0.3rem !important;
+    }
+    .stRadio > div > label > div:first-child {
+        color: #871c30 !important;
+    }
+
+    /* ── Tighten vertical spacing inside expanders ── */
+    .streamlit-expanderContent [data-testid="stVerticalBlock"] {
+        gap: 0.6rem !important;
+    }
+
+    /* ── Download button ── */
+    .stDownloadButton > button {
+        background-color: #871c30 !important;
+        border-color: #871c30 !important;
+        color: white !important;
+        border-radius: 6px !important;
+    }
+    .stDownloadButton > button:hover {
+        background-color: #6b1626 !important;
+    }
+
+    /* ══════ Step Indicator ══════ */
+    .step-indicator {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 0;
+        margin: 0 0 1.5rem 0;
+        padding: 1rem 1.5rem;
+        background: linear-gradient(135deg, #faf7f4 0%, #f4ede5 100%);
+        border-radius: 10px;
+        border: 1px solid #e8e0d8;
+    }
+    .step-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .step-circle {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 0.85rem;
+        flex-shrink: 0;
+        transition: all 0.3s ease;
+    }
+    .step-circle.active {
+        background-color: #871c30;
+        color: white;
+        box-shadow: 0 2px 10px rgba(135, 28, 48, 0.35);
+    }
+    .step-circle.completed {
+        background-color: #871c30;
+        color: white;
+    }
+    .step-circle.pending {
+        background-color: #e0d6cc;
+        color: #8a7e72;
+    }
+    .step-label {
+        font-size: 0.85rem;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+    .step-label.active {
+        color: #871c30;
+    }
+    .step-label.completed {
+        color: #871c30;
+    }
+    .step-label.pending {
+        color: #8a7e72;
+    }
+    .step-connector {
+        width: 60px;
+        height: 2px;
+        margin: 0 1rem;
+        flex-shrink: 0;
+        border-radius: 1px;
+    }
+    .step-connector.completed {
+        background-color: #871c30;
+    }
+    .step-connector.pending {
+        background-color: #e0d6cc;
+    }
+
+    /* ══════ Branded Header ══════ */
+    .branded-header {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 0.5rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 3px solid #871c30;
+    }
+    .branded-header img {
+        height: 56px;
+        width: auto;
+    }
+    .branded-header .branded-title {
+        margin: 0 !important;
+        font-size: 1.6rem !important;
+        line-height: 1.2;
+    }
+    .branded-subtitle {
+        font-size: 0.95rem;
+        color: #666;
+        font-weight: 400;
+        margin-top: 0.1rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+def render_step_indicator() -> None:
+    """Render visual step progress indicator: Upload -> Review -> Export."""
+    current = st.session_state.current_step
+    extraction_done = st.session_state.extraction_complete
+    review_done = st.session_state.review_complete
+
+    steps = [
+        (1, "Upload", extraction_done),
+        (2, "Review", review_done),
+        (3, "Export", False),
+    ]
+
+    items_html = []
+    for i, (num, label, done) in enumerate(steps):
+        if done:
+            cls = "completed"
+            circle = f'<div class="step-circle completed">&#10003;</div>'
+        elif num == current:
+            cls = "active"
+            circle = f'<div class="step-circle active">{num}</div>'
+        else:
+            cls = "pending"
+            circle = f'<div class="step-circle pending">{num}</div>'
+
+        items_html.append(
+            f'<div class="step-item">{circle}<span class="step-label {cls}">{label}</span></div>'
+        )
+
+        # Add connector between steps (not after last)
+        if i < len(steps) - 1:
+            conn_cls = "completed" if done else "pending"
+            items_html.append(f'<div class="step-connector {conn_cls}"></div>')
+
+    html = f'<div class="step-indicator">{"".join(items_html)}</div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def _reset_session_callback() -> None:
+    """Callback to reset all session state."""
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+
+
 def render_sidebar() -> None:
     """Sidebar with logo, session info, and reset button."""
     with st.sidebar:
         # Logo
-        logo_path = Path("assets/logo_transparent.png")
+        logo_path = Path("assets/logo_rgb.png")
         if logo_path.exists():
-            st.image(str(logo_path), width=200)
+            st.image(str(logo_path), width=220)
 
         st.markdown("---")
 
         # Session Info
+        has_info = False
         if st.session_state.client_name:
             st.markdown(f"**Client:** {st.session_state.client_name}")
+            has_info = True
 
         if st.session_state.carriers:
-            st.markdown(f"**Carriers:** {len(st.session_state.carriers)}")
+            named = [c for c in st.session_state.carriers if c.get("name", "").strip()]
+            if named:
+                st.markdown(f"**Carriers:** {len(named)}")
+                has_info = True
 
         if st.session_state.sections_included:
-            st.markdown(f"**Sections:** {', '.join(st.session_state.sections_included)}")
+            st.markdown(f"**Sections:** {', '.join(s.title() for s in st.session_state.sections_included)}")
+            has_info = True
 
-        st.markdown("---")
+        if has_info:
+            st.markdown("---")
 
         # Reset Button
-        if st.button("🔄 Reset Session"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+        st.button("Reset Session", key="reset_btn", on_click=_reset_session_callback, type="secondary")
 
 
 def main() -> None:
     """Main application entry point."""
     st.set_page_config(
         page_title="Scioto Insurance — Quote Comparison",
+        page_icon="assets/logo_rgb.png",
         layout="wide",
         initial_sidebar_state="expanded"
     )
@@ -1246,32 +1574,57 @@ def main() -> None:
     # Initialize session state
     init_session_state()
 
-    # Title
-    st.title("🏠 Scioto Insurance Group — Quote Comparison")
+    # Inject custom CSS (must be first visual element)
+    inject_custom_css()
+
+    # Branded header
+    logo_path = Path("assets/logo_rgb.png")
+    if logo_path.exists():
+        with open(logo_path, "rb") as f:
+            logo_b64 = base64.b64encode(f.read()).decode()
+        st.markdown(f"""
+        <div class="branded-header">
+            <img src="data:image/png;base64,{logo_b64}" alt="Scioto Insurance Group" />
+            <div>
+                <div class="branded-title" style="font-size:1.6rem; font-weight:700; color:#871c30; margin:0;">
+                    Scioto Insurance Group
+                </div>
+                <div class="branded-subtitle">Quote Comparison Tool</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown(
+            '<div class="branded-title" style="font-size:1.6rem; font-weight:700; color:#871c30;">Scioto Insurance Group — Quote Comparison</div>',
+            unsafe_allow_html=True
+        )
+
+    # Step progress indicator
+    render_step_indicator()
 
     # Sidebar
     render_sidebar()
 
     # ── Step 1: Upload & Extract ──
     step1_expanded = (st.session_state.current_step == 1)
-    step1_title = "Step 1: Upload & Extract ✅" if st.session_state.extraction_complete else "Step 1: Upload & Extract"
+    step1_label = "Upload & Extract  ✅" if st.session_state.extraction_complete else "Upload & Extract"
 
-    with st.expander(step1_title, expanded=step1_expanded):
+    with st.expander(step1_label, expanded=step1_expanded):
         render_upload_stage()
 
     # ── Step 2: Review & Edit ──
     if st.session_state.extraction_complete:
         step2_expanded = (st.session_state.current_step == 2)
-        step2_title = "Step 2: Review & Edit ✅" if st.session_state.review_complete else "Step 2: Review & Edit"
+        step2_label = "Review & Edit  ✅" if st.session_state.review_complete else "Review & Edit"
 
-        with st.expander(step2_title, expanded=step2_expanded):
+        with st.expander(step2_label, expanded=step2_expanded):
             render_review_stage()
 
     # ── Step 3: Export ──
     if st.session_state.review_complete:
         step3_expanded = (st.session_state.current_step == 3)
 
-        with st.expander("Step 3: Export", expanded=step3_expanded):
+        with st.expander("Export Results", expanded=step3_expanded):
             render_export_stage()
 
 

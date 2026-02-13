@@ -912,3 +912,70 @@ Full Streamlit wizard is working end-to-end: Upload → Extract → Review & Edi
 - **Logo row height:** Added `updateDimensionProperties` for rows 1-2, setting `pixelSize: 45` (default was ~21px). Logo now has 140×90px of space in merged A1:A2.
 - **Uniform maroon headers on current policy column:** Removed the dark cream override on B3 and replaced the blanket `B4:B25` cream range with four targeted data-only ranges (`B4:B7`, `B10:B15`, `B18:B21`, `B24:B25`). Section header rows 3, 9, 17, 23 now render maroon uniformly across all columns.
 - **"Premium Breakout" label in A3:** Changed A3 from `""` to `"Premium Breakout"` in the carrier header row, rendered as white bold text on maroon.
+
+---
+
+## Phase 7: UI Polish (2026-02-12)
+
+### Step 19: Streamlit Professional Restyling — COMPLETE
+
+**Modified files:**
+- `app/ui/streamlit_app.py` — CSS injection, branded header, step indicator (+369 lines, -16 lines)
+
+**No business logic changed.** All modifications are presentation-only.
+
+**New functions (3):**
+- `inject_custom_css()` — Injects ~200 lines of CSS via `st.markdown(unsafe_allow_html=True)` at start of `main()`
+- `render_step_indicator()` — HTML/CSS step progress bar: Upload → Review → Export with active/completed/pending states
+- `_reset_session_callback()` — Extracted from inline lambda for callback-based navigation pattern
+
+**Branding:**
+- Branded header with `assets/logo_rgb.png` inline as base64 + "Scioto Insurance Group" title + "Quote Comparison Tool" subtitle
+- Maroon `#871c30` accent color applied to: headings (h1/h2/h3), primary buttons, secondary button outlines, radio dots, multiselect pills, progress bars, expander left borders, input focus rings, download buttons
+- `page_icon` set to `assets/logo_rgb.png` (browser tab favicon)
+- Sidebar updated from `logo_transparent.png` → `logo_rgb.png` at 220px width
+- Sidebar section names now title-cased (e.g., "Home" not "home")
+
+**Hidden Streamlit defaults (CSS):**
+- `#MainMenu` (hamburger menu) — `visibility: hidden`
+- `footer` (Made with Streamlit) — `visibility: hidden`
+- `[data-testid="stHeader"]` — `display: none` (removes fixed header bar entirely)
+- `[data-testid="stToolbar"]` — `display: none`
+- `[data-testid="stDecoration"]` — `display: none`
+- Heading anchor links (`h1 a, h2 a, h3 a`) — `display: none`
+
+**Step progress indicator:**
+- Three-step horizontal bar: Upload → Review → Export
+- Active step: maroon circle with shadow + maroon label
+- Completed step: maroon circle with checkmark
+- Pending step: gray circle + muted label
+- Connecting lines fill maroon as steps complete
+- Styled container with cream gradient background and subtle border
+
+**Button styling:**
+- Primary: maroon background, white text, darkens on hover with box-shadow, subtle press animation
+- Secondary: maroon outline and text, subtle fill on hover
+- Download: same maroon treatment as primary
+- Full-width consistency on sidebar buttons
+
+**Card/container styling:**
+- Expanders: left 4px maroon accent border, cream header background, rounded corners, subtle box-shadow
+- Carrier upload containers: 8px border-radius, subtle shadow
+- File uploaders: dashed border that highlights maroon on hover
+
+**Typography & spacing:**
+- h2: bottom border for visual separation, adjusted margins
+- h3: darker maroon (#5a1220), tighter margins
+- `block-container`: max-width 1100px, reduced top padding
+- Expander content: tightened vertical gap (0.6rem)
+- Sidebar: gradient background (cream to slightly darker cream)
+- Input focus states: maroon border + maroon box-shadow
+
+**Expander labels updated:**
+- "Step 1: Upload & Extract" → "Upload & Extract" (step numbers now in progress indicator)
+- "Step 2: Review & Edit" → "Review & Edit"
+- "Step 3: Export" → "Export Results"
+
+**Import added:** `base64` (for inline logo embedding)
+
+**Verification:** Syntax check passed. Streamlit app loads and renders correctly at `http://localhost:8501`. Visual verification via Playwright screenshots confirmed: branded header, step indicator, hidden defaults, maroon buttons, card layouts, clean spacing.
