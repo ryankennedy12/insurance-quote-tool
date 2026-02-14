@@ -2,12 +2,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-"""
-Streamlit UI — Insurance Quote Comparison Tool
-Phase 5, Steps 12-14: Upload, Review & Edit, Export Stages
-
-Entry point: streamlit run app/ui/streamlit_app.py
-"""
+# Streamlit UI — Insurance Quote Comparison Tool
+# Entry point: streamlit run app/ui/streamlit_app.py
 
 import base64
 import streamlit as st
@@ -1922,6 +1918,61 @@ def render_sidebar() -> None:
         st.button("Reset Session", key="reset_btn", on_click=_reset_session_callback, type="secondary")
 
 
+def check_password() -> None:
+    """Show a branded login page and gate access behind a password.
+
+    If already authenticated via session state, returns immediately.
+    Otherwise renders a centered login screen and calls st.stop().
+    """
+    if st.session_state.get("authenticated", False):
+        return
+
+    # Hide Streamlit chrome on the login page too
+    st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden !important;}
+    footer {visibility: hidden !important;}
+    .stDeployButton {display: none !important;}
+    [data-testid="stHeader"] {display: none !important;}
+    [data-testid="stToolbar"] {display: none !important;}
+    [data-testid="stDecoration"] {display: none !important;}
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Center content in the middle third of the page
+    _left, center, _right = st.columns([1, 2, 1])
+
+    with center:
+        # Logo
+        logo_path = Path("assets/logo_rgb.png")
+        if logo_path.exists():
+            with open(logo_path, "rb") as f:
+                logo_b64 = base64.b64encode(f.read()).decode()
+            st.markdown(
+                f'<div style="text-align:center; margin-top:3rem; margin-bottom:1rem;">'
+                f'<img src="data:image/png;base64,{logo_b64}" alt="Scioto Insurance Group" style="max-width:220px;" />'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+        # Prompt text
+        st.markdown(
+            '<p style="text-align:center; color:#871c30; font-size:1.1rem; font-weight:500; margin-bottom:1.5rem;">'
+            'Enter password to access the Quote Comparison Tool'
+            '</p>',
+            unsafe_allow_html=True,
+        )
+
+        # Password input
+        password = st.text_input("Password", type="password", label_visibility="collapsed")
+
+        if password and password == st.secrets["APP_PASSWORD"]:
+            st.session_state["authenticated"] = True
+            st.rerun()
+
+    st.stop()
+
+
 def main() -> None:
     """Main application entry point."""
     st.set_page_config(
@@ -1932,10 +1983,7 @@ def main() -> None:
     )
 
     # ── Password Gate ──
-    password = st.text_input("Password", type="password")
-    if not password or password != st.secrets["APP_PASSWORD"]:
-        st.info("Enter password to continue")
-        st.stop()
+    check_password()
 
     # Initialize session state
     init_session_state()
