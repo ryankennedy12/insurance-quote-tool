@@ -1,3 +1,7 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
 """
 Streamlit UI — Insurance Quote Comparison Tool
 Phase 5, Steps 12-14: Upload, Review & Edit, Export Stages
