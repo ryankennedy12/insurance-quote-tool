@@ -130,13 +130,16 @@ class SciotoComparisonPDF(FPDF):
     def _register_fonts(self):
         """Register bundled DejaVu fonts for professional typography."""
         font_dir = "/usr/share/fonts/truetype/dejavu/"
-        if os.path.exists(font_dir + "DejaVuSans.ttf"):
-            self.add_font("DejaVu", "", font_dir + "DejaVuSans.ttf")
-            self.add_font("DejaVu", "B", font_dir + "DejaVuSans-Bold.ttf")
-            self.add_font("DejaVu", "I", font_dir + "DejaVuSans-Oblique.ttf")
+        font_regular = font_dir + "DejaVuSans.ttf"
+        font_bold = font_dir + "DejaVuSans-Bold.ttf"
+        font_oblique = font_dir + "DejaVuSans-Oblique.ttf"
+        if all(os.path.exists(f) for f in (font_regular, font_bold, font_oblique)):
+            self.add_font("DejaVu", "", font_regular)
+            self.add_font("DejaVu", "B", font_bold)
+            self.add_font("DejaVu", "I", font_oblique)
             self.font_family_name = "DejaVu"
         else:
-            # Fallback to Helvetica for Windows compatibility
+            # Fallback to Helvetica (built-in, supports B/I/BI styles)
             self.font_family_name = "Helvetica"
 
     @property
