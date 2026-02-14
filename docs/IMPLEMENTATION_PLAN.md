@@ -1164,3 +1164,93 @@ Review/Export: unchanged — CarrierBundle identical regardless of source
 - `python -m pytest tests/ -v` — 66 passed (48 new + 18 existing)
 - Import test: `from app.extraction.carrier_config import ...; from app.extraction.ai_extractor import extract_and_validate_multi, ...` — All imports OK
 - No changes to: `validator.py`, `pdf_gen/`, `sheets/`, `config.py`
+
+---
+
+## Phase 10: Multi-Dwelling Support (2026-02-14)
+
+### Step 23: Multi-Dwelling Models, UI, and PDF — COMPLETE
+
+**Problem:** Some clients insure two homes (primary residence + rental/vacation property). The tool needs to support quoting two dwellings per carrier: separate premiums, separate coverage limits, one combined total.
+
+**Modified files (4):**
+- `app/extraction/models.py` — Multi-dwelling fields on all relevant models
+- `app/ui/streamlit_app.py` — Dwelling toggle, dual home upload/edit/review
+- `app/pdf_gen/generator.py` — Dual dwelling sections in PDF output
+- `docs/SHEETS_MULTI_DWELLING_PLAN.md` — Sheets client implementation plan (new)
+
+**`app/extraction/models.py` — model changes:**
+- `CarrierBundle`: Added `home_2: Optional[InsuranceQuote] = None` slot for second dwelling quote
+- `CarrierBundle.total_premium`: Updated property to include `home_2.annual_premium` in sum
+- `CarrierBundle.policy_types_present`: Updated to include `"home_2"` when present
+- `CurrentPolicy`: Added 6 new fields: `home_2_premium`, `home_2_dwelling`, `home_2_other_structures`, `home_2_liability`, `home_2_personal_property`, `home_2_loss_of_use`, `home_2_deductible`
+- `CurrentPolicy.total_premium`: Updated property to include `home_2_premium` in sum
+- `ComparisonSession`: No schema changes needed (carriers list and current_policy already accommodate multi-dwelling through the above)
+
+**`app/ui/streamlit_app.py` — UI changes:**
+- Upload stage: "Number of dwellings" radio toggle (1 or 2) when "home" section is selected
+- When 2 dwellings: separate file uploaders per carrier for "Home 1" and "Home 2" PDFs
+- Current policy manual entry: additional fields for Dwelling 2 (premium, dwelling, other structures, liability, personal property, loss of use, deductible)
+- Extraction loop: extracts Home 2 PDFs and stores as `home_2` on CarrierBundle
+- Review stage: separate editor sections for Dwelling 1 and Dwelling 2 coverage
+- Export stage: `_build_comparison_session()` includes `home_2` data in CarrierBundle and CurrentPolicy
+
+**`app/pdf_gen/generator.py` — PDF changes:**
+- `_has_multi_dwelling(session)` helper: detects if any carrier or current policy has dwelling 2 data
+- Premium Summary: "Home 1 Premium" / "Home 2 Premium" rows when multi-dwelling (vs single "Home Premium")
+- Home Details: "DWELLING 1" / "DWELLING 2" sub-sections with full coverage rows for each
+- `_extract_home_row()`: Parameterized with `dwelling_num` to read from `home` or `home_2`
+- Layout scaling: multi-dwelling adds ~8 extra rows, accounted for in page break logic
+
+**`docs/SHEETS_MULTI_DWELLING_PLAN.md` (new):**
+- Detailed plan for extending `sheets_client.py` from fixed 25-row to dynamic 34-row layout
+- Introduces `GridConfig` dataclass to replace hardcoded `ROW_LABELS`, `HEADER_ROWS`, `CURRENCY_ROWS`
+- Adds "Dwelling 1" / "Dwelling 2" sub-headers with lighter maroon styling
+- Step-by-step implementation: 9 steps covering detection, grid building, formatting, and backward compatibility
+- **Status:** Plan written, implementation pending
+
+**Verification:**
+- `python -m pytest tests/ -v` — All tests pass
+- `python -c "from app.extraction.models import CarrierBundle, CurrentPolicy; print('Multi-dwelling models OK')"` — Pass
+- Visual PDF test with 2-dwelling data generates correctly
+
+---
+
+## Overall Project Status (2026-02-14)
+
+### Phases Complete
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Foundation (structure, config, logging) | COMPLETE |
+| 2 | AI Extraction Engine (models, PDF parser, Gemini, validator) | COMPLETE |
+| 3 | Google Sheets Integration (template-based) | COMPLETE |
+| 4 | PDF Generation (fpdf2 multi-section layout) | COMPLETE |
+| 5 | Web UI (Streamlit wizard: upload → review → export) | COMPLETE |
+| 6 | Google Sheets Rewrite (template-free, programmatic formatting) | COMPLETE |
+| 7 | UI Polish (CSS branding, step indicator, hidden defaults) | COMPLETE |
+| 8 | Bug Fixes & Hardening (Unicode sanitizer, PDF polish) | COMPLETE |
+| 9 | Combined-Carrier Multi-Quote Extraction (Grange, Hanover) | COMPLETE |
+| 10 | Multi-Dwelling Support (models, UI, PDF) | COMPLETE |
+
+### Pending Work
+
+- **Sheets multi-dwelling:** `sheets_client.py` needs dynamic row layout for 2-dwelling sessions. Plan at `docs/SHEETS_MULTI_DWELLING_PLAN.md`. Single-dwelling sessions unaffected.
+- **Phase 6 (Testing):** Real carrier PDF testing across all supported carriers
+- **Phase 7 (Deployment):** `run.bat` desktop shortcut, optional cloud deploy
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `app/extraction/models.py` | Pydantic v2 models: InsuranceQuote, CoverageLimits, CarrierBundle, CurrentPolicy, ComparisonSession, MultiQuoteResponse |
+| `app/extraction/ai_extractor.py` | Gemini 2.5 Flash extraction — single-quote and multi-quote pipelines |
+| `app/extraction/carrier_config.py` | Combined-carrier detection (Grange, Hanover), policy type classification |
+| `app/extraction/pdf_parser.py` | pymupdf4llm text extraction |
+| `app/extraction/validator.py` | Non-blocking validation with warnings |
+| `app/ui/streamlit_app.py` | Streamlit wizard UI (upload, review, export) |
+| `app/pdf_gen/generator.py` | fpdf2 branded PDF comparison report |
+| `app/sheets/sheets_client.py` | Google Sheets programmatic output with formatting |
+| `app/utils/config.py` | Environment variable loading and validation |
+| `tests/test_combined_extraction.py` | 48 unit tests for combined-carrier extraction |
+| `tests/test_pdf_unicode.py` | 18 tests for Unicode sanitization |
