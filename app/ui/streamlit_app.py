@@ -1927,6 +1927,12 @@ def main() -> None:
         initial_sidebar_state="expanded"
     )
 
+    # ── Password Gate ──
+    password = st.text_input("Password", type="password")
+    if not password or password != st.secrets["APP_PASSWORD"]:
+        st.info("Enter password to continue")
+        st.stop()
+
     # Initialize session state
     init_session_state()
 
