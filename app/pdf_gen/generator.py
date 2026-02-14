@@ -128,19 +128,8 @@ class SciotoComparisonPDF(FPDF):
         return super().multi_cell(w, h, _sanitize_text(text), *args, **kwargs)
 
     def _register_fonts(self):
-        """Register bundled DejaVu fonts for professional typography."""
-        font_dir = "/usr/share/fonts/truetype/dejavu/"
-        font_regular = font_dir + "DejaVuSans.ttf"
-        font_bold = font_dir + "DejaVuSans-Bold.ttf"
-        font_oblique = font_dir + "DejaVuSans-Oblique.ttf"
-        if all(os.path.exists(f) for f in (font_regular, font_bold, font_oblique)):
-            self.add_font("DejaVu", "", font_regular)
-            self.add_font("DejaVu", "B", font_bold)
-            self.add_font("DejaVu", "I", font_oblique)
-            self.font_family_name = "DejaVu"
-        else:
-            # Fallback to Helvetica (built-in, supports B/I/BI styles)
-            self.font_family_name = "Helvetica"
+        """Set font family. Uses Helvetica (fpdf2 built-in) for cross-platform reliability."""
+        self.font_family_name = "Helvetica"
 
     @property
     def _footer_margin(self) -> float:
