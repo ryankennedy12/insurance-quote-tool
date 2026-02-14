@@ -1,10 +1,3 @@
-# PDF Generation Spec — Phase 4 (Steps 9-10)
-
-> Place in `docs/`. Reference from CLAUDE.md.
-> The existing code in the user's message is the FOUNDATION — preserve all branding, typography, responsive layout logic, header/footer patterns, and font registration. Modify, don't rewrite.
-
----
-
 ## What's Changing from the Existing Code
 
 ### 1. Remove green "best value" highlighting
@@ -230,3 +223,4 @@ def generate_comparison_pdf(
 - ➕ `agent_notes` parameter and rendering section
 - ➕ Updated brand primary color to `(135, 28, 48)`
 - ➕ Data extraction from ComparisonSession/CarrierBundle/CurrentPolicy models
+

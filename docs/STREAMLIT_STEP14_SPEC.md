@@ -1,10 +1,3 @@
-# Phase 5: Streamlit UI — Step 14: Export Stage
-
-> Place in `docs/`. Reference from CLAUDE.md.
-> This replaces the Step 3 placeholder content in `app/ui/streamlit_app.py` with real PDF generation and Google Sheets export.
-
----
-
 ## Overview
 
 Step 14 builds out the Export stage where the agent:

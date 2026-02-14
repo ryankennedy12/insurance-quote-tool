@@ -1214,6 +1214,118 @@ Review/Export: unchanged — CarrierBundle identical regardless of source
 - `python -c "from app.extraction.models import CarrierBundle, CurrentPolicy; print('Multi-dwelling models OK')"` — Pass
 - Visual PDF test with 2-dwelling data generates correctly
 
+## Phase 11: Sheets Multi-Dwelling & Cloud Deployment (2026-02-14)
+
+### Step 24: Sheets Multi-Dwelling Dynamic Grid — COMPLETE
+
+**Plan:** `docs/SHEETS_MULTI_DWELLING_PLAN.md`
+
+**Modified files:**
+- `app/sheets/sheets_client.py` — Dynamic grid layout replacing hardcoded 25-row structure
+
+**What was removed:**
+- `ROW_LABELS` list — hardcoded 25-element list of column A labels
+- `HEADER_ROWS` list — hardcoded `[1, 3, 9, 17, 23]`
+- `CURRENCY_ROWS` list — hardcoded `[4, 5, 6, 7, 10, 11, 12, 13, 14, 15]`
+- Fixed row-index references throughout `_build_full_grid()` and `_apply_formatting()`
+
+**What was added:**
+
+**`GridConfig` dataclass:**
+- `total_rows` — 25 (single-dwelling) or 34 (multi-dwelling)
+- `header_rows` — dynamically computed maroon header row indices
+- `sub_header_rows` — "Dwelling 1" / "Dwelling 2" sub-header indices (lighter maroon)
+- `currency_rows` — all rows needing `"$"#,##0` formatting
+- `total_row` — premium total row for bold formatting
+- `even_data_rows` — alternating gray shading rows
+- `current_col_ranges` — column B ranges for cream current-policy background
+- `border_range`, `data_align_range`, `label_align_range` — computed range strings
+
+**`_has_multi_dwelling(session)` module-level function:**
+- Detects multi-dwelling from `CurrentPolicy.home_2_premium` or any `CarrierBundle.home_2`
+
+**`_build_home_2_section(session)` method:**
+- 6 rows for Dwelling 2: dwelling, other structures, liability, personal property, loss of use, deductible
+
+**`_build_full_grid()` rewrite:**
+- Now returns `tuple[list[list[Any]], GridConfig]` instead of `list[list[Any]]`
+- Uses row counter + `data_blocks` list to dynamically compute all GridConfig fields
+- Label and section header functions take string labels instead of row indices
+- Single-dwelling: 25 rows (unchanged from before)
+- Multi-dwelling: 34 rows — adds 1 extra premium row (Home 1/Home 2 split) + 2 sub-headers + 6 Dwelling 2 data rows
+
+**`_apply_formatting()` updated:**
+- Now accepts `GridConfig` parameter
+- All range references computed from config instead of hardcoded
+- Added sub-header formatting (`SUB_HEADER_BG` — lighter maroon for Dwelling 1/2 labels)
+- Dynamic `total_row`, `currency_rows`, `even_data_rows`, `current_col_ranges` from config
+
+**`_create_worksheet()` updated:**
+- Accepts `total_rows` parameter (default 25, 34 for multi-dwelling)
+
+**Formatting constant added:**
+- `SUB_HEADER_BG` — `{"red": 0.698, "green": 0.235, "blue": 0.282}` (lighter maroon for sub-headers)
+
+**Backward compatibility:** Single-dwelling sessions produce identical 25-row output.
+
+---
+
+### Step 25: Streamlit Cloud Deployment — COMPLETE
+
+**Commits:**
+1. `feat: add password gate and Streamlit Cloud secrets support` — Password gate + `st.secrets` fallback in config.py
+2. `fix: add sys.path for Streamlit Cloud deployment` — sys.path insert for import resolution
+3. `fix: handle missing DejaVu fonts on Streamlit Cloud` — DejaVu with Helvetica fallback
+4. `fix: use Helvetica exclusively instead of DejaVu fonts` — Removed all DejaVu references
+
+**Modified files (3):**
+- `app/utils/config.py` — Streamlit secrets fallback for all env vars
+- `app/ui/streamlit_app.py` — Password gate + sys.path fix
+- `app/pdf_gen/generator.py` — Helvetica-only fonts
+
+**`app/utils/config.py` — secrets fallback chain:**
+- Try `import streamlit as _st; _secrets = dict(_st.secrets)` with `except Exception` fallback to `{}`
+- All env vars now use `os.getenv(KEY, "") or _secrets.get(KEY, "")` pattern
+- `GEMINI_API_KEY` validation unchanged — raises `ValueError` if both env and secrets are empty
+- `GOOGLE_SERVICE_ACCOUNT_FILE`: Falls back to writing `st.secrets["GOOGLE_SERVICE_ACCOUNT"]` JSON to temp file when local file doesn't exist
+
+**`app/ui/streamlit_app.py` — password gate:**
+- `sys.path.insert(0, ...)` at top for Streamlit Cloud import resolution
+- Password gate before any app rendering: `st.text_input("Password", type="password")` → checks against `st.secrets["APP_PASSWORD"]` → `st.stop()` if wrong
+
+**`app/pdf_gen/generator.py` — Helvetica-only:**
+- `_register_fonts()` now simply sets `self.font_family_name = "Helvetica"` (fpdf2 built-in)
+- Removed all DejaVu font file loading — Streamlit Cloud doesn't ship DejaVu .ttf files
+- `_sanitize_text()` (from Step 20) handles all Unicode → ASCII conversion for Helvetica's Latin-1 encoding
+
+---
+
+### Step 26: Cloud Deployment Simulation Tests — COMPLETE
+
+**New file:** `tests/test_cloud_deploy.py` — 36 tests across 7 test classes
+
+**Critical pattern:** `os.environ.setdefault("GEMINI_API_KEY", "test-key-for-ci")` at module top, before any `from app...` imports, to avoid `ValueError` from config.py import-time validation.
+
+**Shared fixture: `_make_cloud_session()`**
+- Builds `ComparisonSession` with 2 carriers (Erie, Westfield), each with home + auto + umbrella
+- Optional `include_home_2` flag for multi-dwelling tests
+- Optional `include_current` flag (default True) with State Farm current policy
+- `sections_included=["home", "auto", "umbrella"]`, `agent_notes` set
+
+**Test classes:**
+
+| Class | Tests | What it verifies |
+|-------|-------|------------------|
+| `TestFontSimulation` | 3 | No "dejavu" in generator.py source; PDF bytes contain "Helvetica" not "DejaVu"; `font_family_name == "Helvetica"` |
+| `TestMockComparisonSession` | 6 | 2 carriers, 3 sections, current policy present, agent notes set, all policies present, `total_premium > 0` |
+| `TestPDFGeneration` | 6 | Returns path, file >1KB, `%PDF-` header, works with agent_notes/date_str, works without current policy |
+| `TestSheetsGridBuild` | 7 | Single-dwelling → 25 rows, multi-dwelling → 34 rows, `num_data_cols` with/without current, header/currency rows populated, title contains client name. Uses `object.__new__(SheetsClient)` to bypass gspread auth. |
+| `TestStreamlitImports` | 7 | All imports from `streamlit_app.py` lines 1-23 resolve: stdlib, streamlit, models, extractor, carrier_config, pdf_gen, sheets |
+| `TestPasswordGate` | 4 | Wrong/empty/None password → `st.stop()` called; correct password → not called. Uses `MagicMock` with `_StopExecution` sentinel. |
+| `TestStreamlitSecretsFallback` | 3 | `st.secrets` provides key when env var missing; empty secrets → `ValueError`; env var takes precedence. Uses `importlib.reload` + `patch("dotenv.load_dotenv")` to isolate config.py reloads. |
+
+**Verification:** `python -m pytest tests/test_cloud_deploy.py -v` — 36 passed. Full suite: 102 passed.
+
 ---
 
 ## Overall Project Status (2026-02-14)
@@ -1232,10 +1344,10 @@ Review/Export: unchanged — CarrierBundle identical regardless of source
 | 8 | Bug Fixes & Hardening (Unicode sanitizer, PDF polish) | COMPLETE |
 | 9 | Combined-Carrier Multi-Quote Extraction (Grange, Hanover) | COMPLETE |
 | 10 | Multi-Dwelling Support (models, UI, PDF) | COMPLETE |
+| 11 | Sheets Multi-Dwelling & Cloud Deployment | COMPLETE |
 
 ### Pending Work
 
-- **Sheets multi-dwelling:** `sheets_client.py` needs dynamic row layout for 2-dwelling sessions. Plan at `docs/SHEETS_MULTI_DWELLING_PLAN.md`. Single-dwelling sessions unaffected.
 - **Phase 6 (Testing):** Real carrier PDF testing across all supported carriers
 - **Phase 7 (Deployment):** `run.bat` desktop shortcut, optional cloud deploy
 
@@ -1248,9 +1360,10 @@ Review/Export: unchanged — CarrierBundle identical regardless of source
 | `app/extraction/carrier_config.py` | Combined-carrier detection (Grange, Hanover), policy type classification |
 | `app/extraction/pdf_parser.py` | pymupdf4llm text extraction |
 | `app/extraction/validator.py` | Non-blocking validation with warnings |
-| `app/ui/streamlit_app.py` | Streamlit wizard UI (upload, review, export) |
-| `app/pdf_gen/generator.py` | fpdf2 branded PDF comparison report |
-| `app/sheets/sheets_client.py` | Google Sheets programmatic output with formatting |
-| `app/utils/config.py` | Environment variable loading and validation |
+| `app/ui/streamlit_app.py` | Streamlit wizard UI (upload, review, export) with password gate |
+| `app/pdf_gen/generator.py` | fpdf2 branded PDF comparison report (Helvetica-only) |
+| `app/sheets/sheets_client.py` | Google Sheets programmatic output with dynamic grid (25 or 34 rows) |
+| `app/utils/config.py` | Environment variable loading with `st.secrets` fallback |
+| `tests/test_cloud_deploy.py` | 36 cloud deployment simulation tests |
 | `tests/test_combined_extraction.py` | 48 unit tests for combined-carrier extraction |
 | `tests/test_pdf_unicode.py` | 18 tests for Unicode sanitization |

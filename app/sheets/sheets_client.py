@@ -1,6 +1,7 @@
 """Google Sheets integration for insurance quote comparison output."""
 
 import logging
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 import gspread
@@ -56,38 +57,32 @@ LIGHT_GRAY_BG: dict = {"red": 0.973, "green": 0.973, "blue": 0.973}
 CURRENT_COL_BG: dict = {"red": 1.0, "green": 0.973, "blue": 0.941}  # #FFF8F0
 CURRENT_HEADER_BG: dict = {"red": 0.961, "green": 0.902, "blue": 0.827}  # #F5E6D3
 
-ROW_LABELS: list[str] = [
-    "",                    # Row 1: title (handled separately)
-    "",                    # Row 2: date (handled separately)
-    "",                    # Row 3: carrier names (handled separately)
-    "Auto Premium",        # Row 4
-    "Home Premium",        # Row 5
-    "Umbrella Premium",    # Row 6
-    "Total",               # Row 7
-    "",                    # Row 8: blank separator
-    "Home Coverage",       # Row 9: section header
-    "Dwelling",            # Row 10
-    "Other Structures",    # Row 11
-    "Liability",           # Row 12
-    "Personal Property",   # Row 13
-    "Loss of Use",         # Row 14
-    "Deductible",          # Row 15
-    "",                    # Row 16: blank separator
-    "Auto Coverage",       # Row 17: section header
-    "Limits",              # Row 18
-    "UM/UIM",              # Row 19
-    "Comprehensive",       # Row 20
-    "Collision",           # Row 21
-    "",                    # Row 22: blank separator
-    "Umbrella Coverage",   # Row 23: section header
-    "Limits",              # Row 24
-    "Deductible",          # Row 25
-]
-
-HEADER_ROWS: list[int] = [1, 3, 9, 17, 23]
-CURRENCY_ROWS: list[int] = [4, 5, 6, 7, 10, 11, 12, 13, 14, 15]
+SUB_HEADER_BG: dict = {"red": 0.698, "green": 0.235, "blue": 0.282}
 LABEL_COL_WIDTH: int = 140
 DATA_COL_WIDTH: int = 120
+
+
+@dataclass
+class GridConfig:
+    """Dynamic layout config computed alongside grid rows."""
+    total_rows: int = 0
+    header_rows: list[int] = field(default_factory=list)
+    sub_header_rows: list[int] = field(default_factory=list)
+    currency_rows: list[int] = field(default_factory=list)
+    total_row: int = 0
+    even_data_rows: list[int] = field(default_factory=list)
+    current_col_ranges: list[str] = field(default_factory=list)
+    border_range: str = ""
+    data_align_range: str = ""
+    label_align_range: str = ""
+
+
+def _has_multi_dwelling(session: ComparisonSession) -> bool:
+    """Detect if session has multi-dwelling data."""
+    cp = session.current_policy
+    if cp and cp.home_2_premium:
+        return True
+    return any(c.home_2 is not None for c in session.carriers)
 
 
 # ============================================================================
@@ -98,8 +93,8 @@ DATA_COL_WIDTH: int = 120
 class SheetsClient:
     """Google Sheets integration for multi-policy comparison output.
 
-    Transforms a ComparisonSession into a fixed 25-row Google Sheets
-    layout with programmatic formatting — no template dependency.
+    Transforms a ComparisonSession into a dynamic Google Sheets layout:
+    25 rows for single-dwelling, 34 rows for multi-dwelling.
     """
 
     def __init__(self) -> None:
@@ -161,20 +156,21 @@ class SheetsClient:
         try:
             num_data_cols = self._get_num_data_columns(session)
 
-            # 1. Create blank worksheet
-            new_ws = self._create_worksheet(
-                session.client_name, session.date, num_data_cols
-            )
+            # 1. Build full grid and dynamic layout config
+            grid, config = self._build_full_grid(session, num_data_cols)
 
-            # 2. Build full grid (all 25 rows including labels and headers)
-            grid = self._build_full_grid(session, num_data_cols)
+            # 2. Create blank worksheet with dynamic row count
+            new_ws = self._create_worksheet(
+                session.client_name, session.date, num_data_cols,
+                total_rows=config.total_rows,
+            )
 
             # 3. Write to worksheet at A1
             self._write_to_worksheet(new_ws, grid)
 
-            # 4. Apply formatting
+            # 4. Apply formatting using dynamic config
             self._apply_formatting(
-                new_ws, num_data_cols,
+                new_ws, num_data_cols, config,
                 has_current_policy=session.current_policy is not None,
             )
 
@@ -396,8 +392,51 @@ class SheetsClient:
             ),
         ]
 
+    def _build_home_2_section(self, session: ComparisonSession) -> list[list[Any]]:
+        """Build Dwelling 2 home coverage rows.
+
+        Args:
+            session: Comparison session
+
+        Returns:
+            6 rows for dwelling, other structures, liability, personal property,
+            loss of use, and deductible (Dwelling 2)
+        """
+        return [
+            self._build_coverage_row(
+                session,
+                lambda cp: cp.home_2_dwelling,
+                lambda cb: cb.home_2.coverage_limits.dwelling if cb.home_2 else None
+            ),
+            self._build_coverage_row(
+                session,
+                lambda cp: cp.home_2_other_structures,
+                lambda cb: cb.home_2.coverage_limits.other_structures if cb.home_2 else None
+            ),
+            self._build_coverage_row(
+                session,
+                lambda cp: cp.home_2_liability,
+                lambda cb: cb.home_2.coverage_limits.personal_liability if cb.home_2 else None
+            ),
+            self._build_coverage_row(
+                session,
+                lambda cp: cp.home_2_personal_property,
+                lambda cb: cb.home_2.coverage_limits.personal_property if cb.home_2 else None
+            ),
+            self._build_coverage_row(
+                session,
+                lambda cp: cp.home_2_loss_of_use,
+                lambda cb: cb.home_2.coverage_limits.loss_of_use if cb.home_2 else None
+            ),
+            self._build_coverage_row(
+                session,
+                lambda cp: cp.home_2_deductible,
+                lambda cb: cb.home_2.deductible if cb.home_2 else None
+            ),
+        ]
+
     def _build_auto_section(self, session: ComparisonSession) -> list[list[Any]]:
-        """Build rows 18-21 (Auto coverage details).
+        """Build auto coverage detail rows.
 
         Args:
             session: Comparison session
@@ -562,7 +601,8 @@ class SheetsClient:
         return len(session.carriers[:6]) + (1 if session.current_policy else 0)
 
     def _create_worksheet(
-        self, client_name: str, date: str, num_data_cols: int
+        self, client_name: str, date: str, num_data_cols: int,
+        total_rows: int = 25,
     ) -> gspread.Worksheet:
         """Create blank worksheet with unique name.
 
@@ -570,6 +610,7 @@ class SheetsClient:
             client_name: Client name for worksheet title
             date: ISO date string (YYYY-MM-DD)
             num_data_cols: Number of data columns
+            total_rows: Number of rows (25 single-dwelling, 34 multi-dwelling)
 
         Returns:
             New blank worksheet
@@ -589,11 +630,11 @@ class SheetsClient:
         # Create blank worksheet
         new_ws = self.spreadsheet.add_worksheet(
             title=worksheet_name,
-            rows=25,
+            rows=total_rows,
             cols=1 + num_data_cols,
         )
 
-        logger.info("Created worksheet: %s", worksheet_name)
+        logger.info("Created worksheet: %s (%d rows)", worksheet_name, total_rows)
         return new_ws
 
     # ========================================================================
@@ -602,17 +643,23 @@ class SheetsClient:
 
     def _build_full_grid(
         self, session: ComparisonSession, num_data_cols: int
-    ) -> list[list[Any]]:
-        """Build 25-row grid starting at A1 with labels, headers, and data.
+    ) -> tuple[list[list[Any]], GridConfig]:
+        """Build dynamic grid with labels, headers, and data.
+
+        Returns 25 rows for single-dwelling, 34 rows for multi-dwelling.
 
         Args:
             session: Comparison session
             num_data_cols: Number of data columns
 
         Returns:
-            25-row grid ready for writing at A1
+            Tuple of (grid rows, GridConfig with layout metadata)
         """
         total_cols = 1 + num_data_cols
+        is_multi_dw = _has_multi_dwelling(session)
+        config = GridConfig()
+        data_blocks: list[tuple[int, int]] = []
+        row_num = 0
 
         def pad_row(helper_row: list[Any]) -> list[Any]:
             """Trim helper row to num_data_cols, stripping current col if needed."""
@@ -622,30 +669,32 @@ class SheetsClient:
                 data = helper_row
             return (data + [""] * num_data_cols)[:num_data_cols]
 
-        def label_row(row_idx: int, helper_row: list[Any]) -> list[Any]:
+        def label_row(label: str, helper_row: list[Any]) -> list[Any]:
             """Prepend row label to trimmed helper row."""
-            return [ROW_LABELS[row_idx]] + pad_row(helper_row)
+            return [label] + pad_row(helper_row)
 
         def empty_row() -> list[Any]:
             return [""] * total_cols
 
-        def section_header(row_idx: int) -> list[Any]:
-            return [ROW_LABELS[row_idx]] + [""] * num_data_cols
+        def section_header(label: str) -> list[Any]:
+            return [label] + [""] * num_data_cols
 
         grid: list[list[Any]] = []
 
-        # Row 1: Title (A1:A2 reserved for manual logo placement — the
-        # Google Sheets API has no addImage/insertImage request type, so
-        # logo must be inserted manually or via Apps Script)
+        # Row 1: Title (A1:A2 reserved for logo)
+        row_num += 1
         grid.append(
             ["", f"Quote Comparison \u2014 {session.client_name}"]
             + [""] * max(0, num_data_cols - 1)
         )
+        config.header_rows.append(row_num)
 
         # Row 2: Date (B2, A2 is part of logo merge)
+        row_num += 1
         grid.append(["", session.date] + [""] * max(0, num_data_cols - 1))
 
         # Row 3: Carrier names header
+        row_num += 1
         carrier_header: list[Any] = ["Premium Breakout"]
         if session.current_policy:
             current_name = session.current_policy.carrier_name or "Current"
@@ -654,77 +703,200 @@ class SheetsClient:
             carrier_header.append(carrier.carrier_name)
         carrier_header = (carrier_header + [""] * total_cols)[:total_cols]
         grid.append(carrier_header)
+        config.header_rows.append(row_num)
 
-        # Row 4: Auto Premium
-        grid.append(label_row(3, self._build_premium_row(
+        # === Premium Section ===
+        premium_start = row_num + 1
+
+        # Auto Premium
+        row_num += 1
+        grid.append(label_row("Auto Premium", self._build_premium_row(
             session,
             lambda cp: cp.auto_premium,
             lambda cb: cb.auto.annual_premium if cb.auto else None
         )))
+        config.currency_rows.append(row_num)
 
-        # Row 5: Home Premium
-        grid.append(label_row(4, self._build_premium_row(
-            session,
-            lambda cp: cp.home_premium,
-            lambda cb: cb.home.annual_premium if cb.home else None
-        )))
+        # Home Premium(s)
+        if is_multi_dw:
+            row_num += 1
+            grid.append(label_row("Home 1 Premium", self._build_premium_row(
+                session,
+                lambda cp: cp.home_premium,
+                lambda cb: cb.home.annual_premium if cb.home else None
+            )))
+            config.currency_rows.append(row_num)
 
-        # Row 6: Umbrella Premium
-        grid.append(label_row(5, self._build_premium_row(
+            row_num += 1
+            grid.append(label_row("Home 2 Premium", self._build_premium_row(
+                session,
+                lambda cp: cp.home_2_premium,
+                lambda cb: cb.home_2.annual_premium if cb.home_2 else None
+            )))
+            config.currency_rows.append(row_num)
+        else:
+            row_num += 1
+            grid.append(label_row("Home Premium", self._build_premium_row(
+                session,
+                lambda cp: cp.home_premium,
+                lambda cb: cb.home.annual_premium if cb.home else None
+            )))
+            config.currency_rows.append(row_num)
+
+        # Umbrella Premium
+        row_num += 1
+        grid.append(label_row("Umbrella Premium", self._build_premium_row(
             session,
             lambda cp: cp.umbrella_premium,
             lambda cb: cb.umbrella.annual_premium if cb.umbrella else None
         )))
+        config.currency_rows.append(row_num)
 
-        # Row 7: Total
-        grid.append(label_row(6, self._build_total_row(session)))
+        # Total
+        row_num += 1
+        grid.append(label_row("Total", self._build_total_row(session)))
+        config.currency_rows.append(row_num)
+        config.total_row = row_num
+        data_blocks.append((premium_start, row_num))
 
-        # Row 8: Blank separator
+        # Blank separator
+        row_num += 1
         grid.append(empty_row())
 
-        # Row 9: Home Coverage section header
-        grid.append(section_header(8))
+        # === Home Coverage Section ===
+        row_num += 1
+        grid.append(section_header("Home Coverage"))
+        config.header_rows.append(row_num)
 
-        # Rows 10-15: Home details
-        if "home" in session.sections_included:
-            for i, row in enumerate(self._build_home_section(session)):
-                grid.append(label_row(9 + i, row))
+        home_labels = [
+            "Dwelling", "Other Structures", "Liability",
+            "Personal Property", "Loss of Use", "Deductible",
+        ]
+        home_data = (
+            self._build_home_section(session)
+            if "home" in session.sections_included
+            else None
+        )
+
+        if is_multi_dw:
+            home_2_data = (
+                self._build_home_2_section(session)
+                if "home" in session.sections_included
+                else None
+            )
+
+            # Dwelling 1 sub-header
+            row_num += 1
+            grid.append(section_header("Dwelling 1"))
+            config.sub_header_rows.append(row_num)
+
+            # Dwelling 1 data rows
+            dw1_start = row_num + 1
+            for i, label in enumerate(home_labels):
+                row_num += 1
+                if home_data:
+                    grid.append(label_row(label, home_data[i]))
+                else:
+                    grid.append([label] + [""] * num_data_cols)
+                config.currency_rows.append(row_num)
+            data_blocks.append((dw1_start, row_num))
+
+            # Dwelling 2 sub-header
+            row_num += 1
+            grid.append(section_header("Dwelling 2"))
+            config.sub_header_rows.append(row_num)
+
+            # Dwelling 2 data rows
+            dw2_start = row_num + 1
+            for i, label in enumerate(home_labels):
+                row_num += 1
+                if home_2_data:
+                    grid.append(label_row(label, home_2_data[i]))
+                else:
+                    grid.append([label] + [""] * num_data_cols)
+                config.currency_rows.append(row_num)
+            data_blocks.append((dw2_start, row_num))
         else:
-            for i in range(6):
-                grid.append([ROW_LABELS[9 + i]] + [""] * num_data_cols)
+            # Single-dwelling: 6 data rows
+            home_start = row_num + 1
+            for i, label in enumerate(home_labels):
+                row_num += 1
+                if home_data:
+                    grid.append(label_row(label, home_data[i]))
+                else:
+                    grid.append([label] + [""] * num_data_cols)
+                config.currency_rows.append(row_num)
+            data_blocks.append((home_start, row_num))
 
-        # Row 16: Blank separator
+        # Blank separator
+        row_num += 1
         grid.append(empty_row())
 
-        # Row 17: Auto Coverage section header
-        grid.append(section_header(16))
+        # === Auto Coverage Section ===
+        row_num += 1
+        grid.append(section_header("Auto Coverage"))
+        config.header_rows.append(row_num)
 
-        # Rows 18-21: Auto details
-        if "auto" in session.sections_included:
-            for i, row in enumerate(self._build_auto_section(session)):
-                grid.append(label_row(17 + i, row))
-        else:
-            for i in range(4):
-                grid.append([ROW_LABELS[17 + i]] + [""] * num_data_cols)
+        auto_labels = ["Limits", "UM/UIM", "Comprehensive", "Collision"]
+        auto_data = (
+            self._build_auto_section(session)
+            if "auto" in session.sections_included
+            else None
+        )
+        auto_start = row_num + 1
+        for i, label in enumerate(auto_labels):
+            row_num += 1
+            if auto_data:
+                grid.append(label_row(label, auto_data[i]))
+            else:
+                grid.append([label] + [""] * num_data_cols)
+        data_blocks.append((auto_start, row_num))
 
-        # Row 22: Blank separator
+        # Blank separator
+        row_num += 1
         grid.append(empty_row())
 
-        # Row 23: Umbrella Coverage section header
-        grid.append(section_header(22))
+        # === Umbrella Coverage Section ===
+        row_num += 1
+        grid.append(section_header("Umbrella Coverage"))
+        config.header_rows.append(row_num)
 
-        # Rows 24-25: Umbrella details
-        if "umbrella" in session.sections_included:
-            for i, row in enumerate(self._build_umbrella_section(session)):
-                grid.append(label_row(23 + i, row))
-        else:
-            for i in range(2):
-                grid.append([ROW_LABELS[23 + i]] + [""] * num_data_cols)
+        umbrella_labels = ["Limits", "Deductible"]
+        umbrella_data = (
+            self._build_umbrella_section(session)
+            if "umbrella" in session.sections_included
+            else None
+        )
+        umbrella_start = row_num + 1
+        for i, label in enumerate(umbrella_labels):
+            row_num += 1
+            if umbrella_data:
+                grid.append(label_row(label, umbrella_data[i]))
+            else:
+                grid.append([label] + [""] * num_data_cols)
+        data_blocks.append((umbrella_start, row_num))
+
+        # Compute even_data_rows from data blocks
+        for start, end in data_blocks:
+            for i, row in enumerate(range(start, end + 1)):
+                if i % 2 == 0:
+                    config.even_data_rows.append(row)
+
+        # Compute current_col_ranges from data blocks
+        for start, end in data_blocks:
+            config.current_col_ranges.append(f"B{start}:B{end}")
+
+        # Finalize config
+        last_col = chr(ord('A') + num_data_cols)
+        config.total_rows = row_num
+        config.border_range = f"A3:{last_col}{row_num}"
+        config.data_align_range = f"B4:{last_col}{row_num}"
+        config.label_align_range = f"A4:A{row_num}"
 
         logger.debug(
             "Built grid: %d rows x %d columns", len(grid), total_cols
         )
-        return grid
+        return grid, config
 
     # ========================================================================
     # Write & Format
@@ -748,10 +920,11 @@ class SheetsClient:
         self,
         worksheet: gspread.Worksheet,
         num_data_cols: int,
+        config: GridConfig,
         *,
         has_current_policy: bool = True,
     ) -> None:
-        """Apply all formatting to worksheet.
+        """Apply all formatting to worksheet using dynamic GridConfig.
 
         Uses batch_format() for cell formatting and spreadsheet.batch_update()
         for column widths and cell merges.
@@ -759,15 +932,17 @@ class SheetsClient:
         Args:
             worksheet: Target worksheet
             num_data_cols: Number of data columns
+            config: Dynamic layout config from _build_full_grid
             has_current_policy: Whether column B is a current policy column
         """
         last_col = chr(ord('A') + num_data_cols)
+        last_row = config.total_rows
         sheet_id = worksheet.id
 
         # Build format rules list
         formats: list[dict] = []
 
-        # --- Maroon headers (rows 1, 3, 9, 17, 23) ---
+        # --- Maroon headers (dynamic from config) ---
         maroon_fmt = {
             "backgroundColor": MAROON_BG,
             "horizontalAlignment": "CENTER",
@@ -776,7 +951,7 @@ class SheetsClient:
                 "bold": True,
             },
         }
-        for row in HEADER_ROWS:
+        for row in config.header_rows:
             if row == 1:
                 # Title row starts at B1 (A1:A2 reserved for logo)
                 formats.append({
@@ -789,14 +964,30 @@ class SheetsClient:
                     "format": maroon_fmt,
                 })
 
-        # --- Bold total (row 7) ---
-        formats.append({
-            "range": f"A7:{last_col}7",
-            "format": {"textFormat": {"bold": True}},
-        })
+        # --- Sub-headers (Dwelling 1 / Dwelling 2) — slightly lighter maroon ---
+        sub_header_fmt = {
+            "backgroundColor": SUB_HEADER_BG,
+            "horizontalAlignment": "CENTER",
+            "textFormat": {
+                "foregroundColor": WHITE_TEXT,
+                "bold": True,
+            },
+        }
+        for row in config.sub_header_rows:
+            formats.append({
+                "range": f"A{row}:{last_col}{row}",
+                "format": sub_header_fmt,
+            })
 
-        # --- Currency formatting (rows 4-7, 10-15) on data columns only ---
-        for row in CURRENCY_ROWS:
+        # --- Bold total row (dynamic from config) ---
+        if config.total_row:
+            formats.append({
+                "range": f"A{config.total_row}:{last_col}{config.total_row}",
+                "format": {"textFormat": {"bold": True}},
+            })
+
+        # --- Currency formatting (dynamic from config) on data columns only ---
+        for row in config.currency_rows:
             formats.append({
                 "range": f"B{row}:{last_col}{row}",
                 "format": {
@@ -807,9 +998,8 @@ class SheetsClient:
                 },
             })
 
-        # --- Alternating gray shading on even data rows ---
-        even_data_rows = [4, 6, 10, 12, 14, 18, 20, 24]
-        for row in even_data_rows:
+        # --- Alternating gray shading on even data rows (dynamic from config) ---
+        for row in config.even_data_rows:
             formats.append({
                 "range": f"A{row}:{last_col}{row}",
                 "format": {"backgroundColor": LIGHT_GRAY_BG},
@@ -818,19 +1008,19 @@ class SheetsClient:
         # --- Current Policy column: cream background on data rows only
         #     (skip section headers so maroon applies uniformly) ---
         if has_current_policy:
-            for rng in ("B4:B7", "B10:B15", "B18:B21", "B24:B25"):
+            for rng in config.current_col_ranges:
                 formats.append({
                     "range": rng,
                     "format": {"backgroundColor": CURRENT_COL_BG},
                 })
 
-        # --- Thin borders (A3 through last_col:25) ---
+        # --- Thin borders (A3 through last row) ---
         thin_border = {
             "style": "SOLID",
             "color": {"red": 0.8, "green": 0.8, "blue": 0.8},
         }
         formats.append({
-            "range": f"A3:{last_col}25",
+            "range": config.border_range,
             "format": {
                 "borders": {
                     "top": thin_border,
@@ -843,13 +1033,13 @@ class SheetsClient:
 
         # --- Data alignment: center for data cols ---
         formats.append({
-            "range": f"B4:{last_col}25",
+            "range": config.data_align_range,
             "format": {"horizontalAlignment": "CENTER"},
         })
 
         # --- Label alignment: left for column A ---
         formats.append({
-            "range": "A4:A25",
+            "range": config.label_align_range,
             "format": {"horizontalAlignment": "LEFT"},
         })
 
@@ -894,8 +1084,7 @@ class SheetsClient:
                     "fields": "pixelSize",
                 },
             },
-            # Merge A1:A2 for logo placeholder (insert logo manually or
-            # via Apps Script — Sheets REST API has no image insertion)
+            # Merge A1:A2 for logo placeholder
             {
                 "mergeCells": {
                     "range": {
